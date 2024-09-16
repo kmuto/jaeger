@@ -6,6 +6,6 @@ FROM golang:bookworm AS builder
 FROM scratch
 EXPOSE 8080 8081 8082 8083
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY ./hotrod-linux-amd64 /go/bin/hotrod-linux-amd64
-ENTRYPOINT ["/go/bin/hotrod-linux-amd64"]
+COPY ./hotrod-linux /go/bin/hotrod-linux
+ENTRYPOINT ["/go/bin/hotrod-linux"]
 CMD ["all"]
