@@ -25,12 +25,24 @@ services:
     command: ["all"]
     environment:
       #- OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-      - OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-vaxila.mackerelio.com
-      - OTEL_EXPORTER_OTLP_HEADERS=Mackerel-Api-Key=${MACKEREL_VAXILA_APIKEY}
+      #- OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-vaxila.mackerelio.com
+      #- OTEL_EXPORTER_OTLP_HEADERS=Mackerel-Api-Key=${MACKEREL_VAXILA_APIKEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:
       - jaeger-example
     depends_on:
       - jaeger
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otel-col.yml:/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4319:4319"
+    environment:
+      - MACKEREL_VAXILA_APIKEY
+    networks:
+      - jaeger-example
+      
 networks:
   jaeger-example:
