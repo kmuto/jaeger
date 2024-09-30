@@ -14,3 +14,9 @@ $ docker compose up
 # Finished
 $ docker compose down
 ```
+
+## Vaxila
+On Trce List page,
+
+- Set `frontend` in Service
+- Append `service_namespace:kmuto/jaeger/hotrod` in Conditions
