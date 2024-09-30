@@ -1,0 +1,43 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: "0.0.0.0:4319"
+processors:
+  batch:
+    # Vaxila では 6MB 以上のリクエストを受け付けません。
+    # そのため、リクエストあたりの最大スパン数を適当に設定します。
+    # スパンはトレースにおける作業または操作の単位です。
+    # データベースへのクエリ実行やアプリケーションの処理の 1 部分などをスパンとして表現できます。
+    # https://opentelemetry.io/docs/concepts/signals/traces/#spans
+    # Vaxila には Mackerel の 1 オーガニゼーションあたり月間 500 万スパンまで送信できます
+    timeout: 1m
+    send_batch_size: 5000
+    send_batch_max_size: 5000
+  resource/namespace:
+    attributes:
+    - key: service.namespace
+      value: "kmuto/jaeger/hotrod"
+      action: upsert
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 500
+    spike_limit_mib: 100
+
+exporters:
+  otlphttp/vaxila:
+    endpoint: https://otlp-vaxila.mackerelio.com
+    compression: gzip
+    headers:
+      Mackerel-Api-Key: ${env:MACKEREL_VAXILA_APIKEY}
+  otlphttp/jeager:
+    endpoint: http://jaeger:4318
+    compression: gzip
+    tls:
+      insecure: true
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource/namespace,batch,memory_limiter]
+      exporters: [otlphttp/vaxila,otlphttp/jeager]
