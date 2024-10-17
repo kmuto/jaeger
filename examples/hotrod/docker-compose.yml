@@ -14,7 +14,8 @@ services:
       - jaeger-example
 
   hotrod:
-    image: ${REGISTRY:-}jaegertracing/example-hotrod:${JAEGER_VERSION:-latest}
+    #image: ${REGISTRY:-}jaegertracing/example-hotrod:${JAEGER_VERSION:-latest}
+    image: kmuto:hotrod
     # To run the latest trunk build, find the tag at Docker Hub and use the line below
     # https://hub.docker.com/r/jaegertracing/example-hotrod-snapshot/tags
     #image: jaegertracing/example-hotrod-snapshot:0ab8f2fcb12ff0d10830c1ee3bb52b745522db6c
@@ -23,11 +24,25 @@ services:
       - "8083:8083"
     command: ["all"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      #- OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      #- OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-vaxila.mackerelio.com
+      #- OTEL_EXPORTER_OTLP_HEADERS=Mackerel-Api-Key=${MACKEREL_VAXILA_APIKEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:
       - jaeger-example
     depends_on:
       - jaeger
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otel-col.yml:/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4319:4319"
+    environment:
+      - MACKEREL_VAXILA_APIKEY
+    networks:
+      - jaeger-example
+      
 networks:
   jaeger-example:
