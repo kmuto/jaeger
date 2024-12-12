@@ -89,7 +89,7 @@ func (eta *bestETA) Get(ctx context.Context, customerID int) (*Response, error) 
 	resp := &Response{ETA: math.MaxInt64}
 	for _, result := range results {
 		if result.err != nil {
-			return nil, err
+			return nil, result.err
 		}
 		if result.route.ETA < resp.ETA {
 			resp.ETA = result.route.ETA
@@ -120,7 +120,8 @@ func (eta *bestETA) getRoutes(ctx context.Context, customer *customer.Customer, 
 		driver := dd // capture loop var
 		// Use worker pool to (potentially) execute requests in parallel
 		eta.pool.Execute(func() {
-			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location)
+			crashornot := config.CrashRoasters && customer.Name == "Amazing_Coffee_Roasters"
+			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location, crashornot)
 			routesLock.Lock()
 			results = append(results, routeResult{
 				driver: driver.DriverID,
