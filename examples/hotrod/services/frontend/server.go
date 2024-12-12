@@ -28,13 +28,14 @@ var assetFS embed.FS
 
 // Server implements jaeger-demo-frontend service
 type Server struct {
-	hostPort string
-	tracer   trace.TracerProvider
-	logger   log.Factory
-	bestETA  *bestETA
-	assetFS  http.FileSystem
-	basepath string
-	jaegerUI string
+	hostPort     string
+	tracer       trace.TracerProvider
+	logger       log.Factory
+	bestETA      *bestETA
+	assetFS      http.FileSystem
+	basepath     string
+	jaegerUI     string
+	frontMessage string
 }
 
 // ConfigOptions used to make sure service clients
@@ -46,18 +47,20 @@ type ConfigOptions struct {
 	RouteHostPort    string
 	Basepath         string
 	JaegerUI         string
+	FrontMessage     string
 }
 
 // NewServer creates a new frontend.Server
 func NewServer(options ConfigOptions, tracer trace.TracerProvider, logger log.Factory) *Server {
 	return &Server{
-		hostPort: options.FrontendHostPort,
-		tracer:   tracer,
-		logger:   logger,
-		bestETA:  newBestETA(tracer, logger, options),
-		assetFS:  httpfs.PrefixedFS("web_assets", http.FS(assetFS)),
-		basepath: options.Basepath,
-		jaegerUI: options.JaegerUI,
+		hostPort:     options.FrontendHostPort,
+		tracer:       tracer,
+		logger:       logger,
+		bestETA:      newBestETA(tracer, logger, options),
+		assetFS:      httpfs.PrefixedFS("web_assets", http.FS(assetFS)),
+		basepath:     options.Basepath,
+		jaegerUI:     options.JaegerUI,
+		frontMessage: options.FrontMessage,
 	}
 }
 
@@ -86,7 +89,8 @@ func (s *Server) createServeMux() http.Handler {
 
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	config := map[string]string{
-		"jaeger": s.jaegerUI,
+		"jaeger":       s.jaegerUI,
+		"frontMessage": s.frontMessage,
 	}
 	s.writeResponse(config, w, r)
 }

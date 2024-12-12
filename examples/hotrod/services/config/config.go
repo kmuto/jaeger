@@ -49,4 +49,7 @@ var (
 
 	// RouteCalcDelayStdDev is standard deviation
 	RouteCalcDelayStdDev = RouteCalcDelay / 4
+
+	// CrashRoasters controls whether roasters crash randomly
+	CrashRoasters = false
 )

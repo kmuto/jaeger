@@ -32,12 +32,15 @@ func NewClient(tracer trace.TracerProvider, logger log.Factory, hostPort string)
 }
 
 // FindRoute implements route.Interface#FindRoute as an RPC
-func (c *Client) FindRoute(ctx context.Context, pickup, dropoff string) (*Route, error) {
+func (c *Client) FindRoute(ctx context.Context, pickup, dropoff string, crashRoasters bool) (*Route, error) {
 	c.logger.For(ctx).Info("Finding route", zap.String("pickup", pickup), zap.String("dropoff", dropoff))
 
 	v := url.Values{}
 	v.Set("pickup", pickup)
 	v.Set("dropoff", dropoff)
+	if crashRoasters {
+		v.Set("crashRoasters", "yes")
+	}
 	url := "http://" + c.hostPort + "/route?" + v.Encode()
 	var route Route
 	if err := c.client.GetJSON(ctx, "/route", url, &route); err != nil {

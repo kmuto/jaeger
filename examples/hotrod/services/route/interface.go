@@ -18,5 +18,5 @@ type Route struct {
 
 // Interface exposed by the Driver service.
 type Interface interface {
-	FindRoute(ctx context.Context, pickup, dropoff string) (*Route, error)
+	FindRoute(ctx context.Context, pickup, dropoff string, crashRoasters bool) (*Route, error)
 }

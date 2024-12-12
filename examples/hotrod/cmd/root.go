@@ -72,7 +72,10 @@ func onInitialize() {
 		logger.Info("fix: overriding route worker pool size", zap.Int("old", config.RouteWorkerPoolSize), zap.Int("new", fixRouteWorkerPoolSize))
 		config.RouteWorkerPoolSize = fixRouteWorkerPoolSize
 	}
-
+	if crashRoasters {
+		logger.Info("fix: overriding crash roasters")
+		config.CrashRoasters = true
+	}
 	if customerPort != 8081 {
 		logger.Info("changing customer service port", zap.Int("old", 8081), zap.Int("new", customerPort))
 	}
