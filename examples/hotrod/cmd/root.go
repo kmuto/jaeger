@@ -76,6 +76,10 @@ func onInitialize() {
 		logger.Info("fix: overriding crash roasters")
 		config.CrashRoasters = true
 	}
+	if fixRedisTimeout {
+		logger.Info("fix: disabling redis timeout")
+		config.FixRedisTimeout = true
+	}
 	if customerPort != 8081 {
 		logger.Info("changing customer service port", zap.Int("old", 8081), zap.Int("new", customerPort))
 	}

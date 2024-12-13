@@ -17,6 +17,7 @@ var (
 	fixDBConnDisableMutex  bool
 	fixRouteWorkerPoolSize int
 	crashRoasters          bool
+	fixRedisTimeout        bool
 
 	customerPort int
 	driverPort   int
@@ -36,6 +37,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVarP(&fixDBConnDisableMutex, "fix-disable-db-conn-mutex", "M", false, "Disables the mutex guarding db connection")
 	cmd.PersistentFlags().IntVarP(&fixRouteWorkerPoolSize, "fix-route-worker-pool-size", "W", 3, "Default worker pool size")
 	cmd.PersistentFlags().BoolVarP(&crashRoasters, "crash-roasters", "R", false, "Cause roasters to crash randomly")
+	cmd.PersistentFlags().BoolVarP(&fixRedisTimeout, "fix-redis-timeout", "S", false, "Avoid Redis timeout")
 	cmd.PersistentFlags().StringVarP(&frontMessage, "message", "m", "", "Message to display on the frontend")
 
 	// Add flags to choose ports for services

@@ -22,7 +22,7 @@ services:
     ports:
       - "8080:8080"
       #- "8083:8083"
-    command: ["all", "-m", "<p>注目するのはリクエストから配車に至るlatencyの値です。同じボタンを連打したときにlatencyが伸びていくのを確認し、トレースを見てみましょう。</p>"]
+    command: ["all", "-S", "-m", "<p>注目するのはリクエストから配車に至るlatencyの値です。同じボタンを連打したときにlatencyが伸びていくのを確認し、トレースを見てみましょう。</p>"]
     environment:
       #- OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       #- OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-vaxila.mackerelio.com
@@ -37,7 +37,7 @@ services:
     image: kmuto:hotrod
     ports:
       - "8081:8080"
-    command: ["all", "-M", "-m", "<p>DBへのアクセスを改善したので連打してもlatency値は変わらなくなっています。さらにlatencyを下げるために何ができるでしょうか。トレースを見てみましょう。</p>"]
+    command: ["all", "-S", "-M", "-m", "<p>DBへのアクセスを改善したので連打してもlatency値は変わらなくなっています。さらにlatencyを下げるために何ができるでしょうか。トレースを見てみましょう。</p>"]
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:
@@ -49,7 +49,7 @@ services:
     image: kmuto:hotrod
     ports:
       - "8082:8080"
-    command: ["all", "-M", "-D", "100ms", "-W", "100", "-m", "<p>ルート検索の並列性を上げ、待ち時間を短縮しました。トレースを見てみましょう。</p>"]
+    command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-m", "<p>ルート検索の並列性を上げ、待ち時間を短縮しました。トレースを見てみましょう。</p>"]
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:
@@ -61,7 +61,7 @@ services:
     image: kmuto:hotrod
     ports:
       - "8083:8080"
-    command: ["all", "-M", "-D", "100ms", "-W", "100", "-R", "-m", "<p>最後に、特定操作で障害を発生させてみます。「Amazing Coffee Roasters」だけ、クリックしても様子がおかしいです。トレースを見てみましょう。リンクはないのでトレースツール側で調べてください。</p>"]
+    command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-R", "-m", "<p>最後に、特定操作で障害を発生させてみます。「Amazing Coffee Roasters」だけ、クリックしても様子がおかしいです。トレースを見てみましょう。リンクはないのでトレースツール側で調べてください。</p>"]
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:

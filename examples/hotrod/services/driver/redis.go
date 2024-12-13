@@ -64,13 +64,14 @@ func (r *Redis) GetDriver(ctx context.Context, driverID string) (Driver, error) 
 
 	// simulate RPC delay
 	delay.Sleep(config.RedisGetDelay, config.RedisGetDelayStdDev)
-	if err := r.checkError(); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "An error occurred")
-		r.logger.For(ctx).Error("redis timeout", zap.String("driver_id", driverID), zap.Error(err))
-		return Driver{}, err
+	if !config.FixRedisTimeout {
+		if err := r.checkError(); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "An error occurred")
+			r.logger.For(ctx).Error("redis timeout", zap.String("driver_id", driverID), zap.Error(err))
+			return Driver{}, err
+		}
 	}
-
 	r.logger.For(ctx).Info("Got driver's ID", zap.String("driverID", driverID))
 
 	// #nosec

@@ -52,4 +52,7 @@ var (
 
 	// CrashRoasters controls whether roasters crash randomly
 	CrashRoasters = false
+
+	// FixRedisTimeout controls whether to disable Redis timeout
+	FixRedisTimeout = false
 )
