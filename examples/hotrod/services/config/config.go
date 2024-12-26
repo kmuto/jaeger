@@ -50,8 +50,8 @@ var (
 	// RouteCalcDelayStdDev is standard deviation
 	RouteCalcDelayStdDev = RouteCalcDelay / 4
 
-	// CrashRoasters controls whether roasters crash randomly
-	CrashRoasters = false
+	// Vip controls whether roasters crash or not
+	Vip = false
 
 	// FixRedisTimeout controls whether to disable Redis timeout
 	FixRedisTimeout = false

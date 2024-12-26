@@ -72,9 +72,9 @@ func onInitialize() {
 		logger.Info("fix: overriding route worker pool size", zap.Int("old", config.RouteWorkerPoolSize), zap.Int("new", fixRouteWorkerPoolSize))
 		config.RouteWorkerPoolSize = fixRouteWorkerPoolSize
 	}
-	if crashRoasters {
+	if vip {
 		logger.Info("fix: overriding crash roasters")
-		config.CrashRoasters = true
+		config.Vip = true
 	}
 	if fixRedisTimeout {
 		logger.Info("fix: disabling redis timeout")

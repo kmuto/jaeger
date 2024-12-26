@@ -82,9 +82,9 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if config.CrashRoasters && r.Form.Get("crashRoasters") != "" && rand.Intn(2) == 0 {
+	if config.Vip && r.Form.Get("vip") != "" && rand.Intn(2) == 0 {
 		delay.Sleep(1*time.Second, 0)
-		panic("roasters crashed by request")
+		panic("VIP logic is not implemented")
 	}
 
 	response := computeRoute(ctx, pickup, dropoff)

@@ -120,8 +120,8 @@ func (eta *bestETA) getRoutes(ctx context.Context, customer *customer.Customer, 
 		driver := dd // capture loop var
 		// Use worker pool to (potentially) execute requests in parallel
 		eta.pool.Execute(func() {
-			crashornot := config.CrashRoasters && customer.Name == "Amazing_Coffee_Roasters"
-			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location, crashornot)
+			vip := config.Vip && customer.Name == "Amazing_Coffee_Roasters"
+			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location, vip)
 			routesLock.Lock()
 			results = append(results, routeResult{
 				driver: driver.DriverID,
