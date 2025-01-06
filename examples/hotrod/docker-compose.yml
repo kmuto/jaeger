@@ -69,6 +69,18 @@ services:
     depends_on:
       - jaeger
 
+  hotrod5:
+    image: kmuto:hotrod
+    ports:
+      - "8084:8080"
+    command: ["all", "-m", "<p>デモの前に実行する用。Redis timeoutを持つトレースを記録します。</p>"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+    networks:
+      - jaeger-example
+    depends_on:
+      - jaeger
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     volumes:
@@ -79,6 +91,6 @@ services:
       - MACKEREL_VAXILA_APIKEY
     networks:
       - jaeger-example
-      
+
 networks:
   jaeger-example:
