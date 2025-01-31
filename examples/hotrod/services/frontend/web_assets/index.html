@@ -126,7 +126,7 @@ $(".hotrod-button").click(function(evt) {
         //traceLink = ` [<a href="https://mackerel.io/vaxila/traces${findURL}" target="vaxila">find trace</a>]`;
         if (traceID) {
           //traceLink += ` [<a href="${jaeger}/trace/${traceID}" target="_blank">open trace</a>]`;
-          traceLink += ` [<a href="https://mackerel.io/my/tracing/traces/${traceID}" target="vaxila">vaxila</a>] [<a href="${jaeger}/trace/${traceID}" target="jaeger">jaeger</a>]`;
+          traceLink += ` [<a href="https://mackerel.io/my/tracing/traces/${traceID}" target="vaxila">Mackerel</a>] [<a href="${jaeger}/trace/${traceID}" target="jaeger">jaeger</a>]`;
         }
       }
       freshCar.html(`HotROD <b>${data.Driver}</b> arriving in ${duration} [req: ${requestID}, latency: ${after-before}ms] ${traceLink}`);
