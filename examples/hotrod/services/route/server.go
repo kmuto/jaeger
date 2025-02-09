@@ -7,6 +7,7 @@ package route
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"math/rand"
 	"net/http"
@@ -89,10 +90,15 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		panic("VIP logic is not implemented")
 	}
 
-	response := s.computeRoute(ctx, pickup, dropoff)
-
-	if response == nil {
-		http.Error(w, "Invalid pickup or dropoff", http.StatusBadRequest)
+	response, err := s.computeRoute(ctx, pickup, dropoff)
+	if err != nil {
+		// want add here to record error as Span Event. Span is not available here yet. Create span here.
+		ctx, span := s.tracer.Tracer("route").Start(ctx, "computeRoute")
+		span.RecordError(err)
+		span.End()
+		s.logger.For(ctx).Error("invalid pickup or dropoff", zap.Error(err))
+		//panic(err.Error())
+		// http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -106,7 +112,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) *Route {
+func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) (*Route, error) {
 	start := time.Now()
 	defer func() {
 		updateCalcStats(ctx, time.Since(start))
@@ -124,13 +130,14 @@ func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) *Rout
 	oy, _ := strconv.ParseFloat(dropoffs[1], 64)
 
 	eta := math.Max(2, ((math.Abs(ox-ux) + math.Abs(oy-uy)) / 60.0))
-	if eta > 20 {
-		panic("Route calculation took too long")
+	if eta > float64(config.MaxRouteLength) {
+		delay.Sleep(2*time.Second, 0)
+		return nil, errors.New("Route calculation took too long")
 	}
 
 	return &Route{
 		Pickup:  pickup,
 		Dropoff: dropoff,
 		ETA:     time.Duration(eta) * time.Minute,
-	}
+	}, nil
 }

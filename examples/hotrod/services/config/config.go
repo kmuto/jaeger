@@ -55,4 +55,7 @@ var (
 
 	// FixRedisTimeout controls whether to disable Redis timeout
 	FixRedisTimeout = false
+
+	// MaxRouteLength is the maximum length of a route
+	MaxRouteLength = 9999
 )
