@@ -115,13 +115,25 @@ func (eta *bestETA) getRoutes(ctx context.Context, customer *customer.Customer, 
 	results := make([]routeResult, 0, len(drivers))
 	wg := sync.WaitGroup{}
 	routesLock := sync.Mutex{}
+	retries := 3
+
 	for _, dd := range drivers {
 		wg.Add(1)
 		driver := dd // capture loop var
 		// Use worker pool to (potentially) execute requests in parallel
 		eta.pool.Execute(func() {
 			vip := config.Vip && customer.ID == "567" // customer.Name == "Amazing_Coffee_Roasters"
-			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location, vip)
+			var route *route.Route
+			var err error
+			for attempt := 1; attempt <= retries; attempt++ {
+				route, err = eta.route.FindRoute(ctx, driver.Location, customer.Location, vip)
+				if err == nil {
+					break
+				}
+				if attempt < retries {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
 			routesLock.Lock()
 			results = append(results, routeResult{
 				driver: driver.DriverID,

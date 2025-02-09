@@ -10,6 +10,8 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -87,7 +89,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		panic("VIP logic is not implemented")
 	}
 
-	response := computeRoute(ctx, pickup, dropoff)
+	response := s.computeRoute(ctx, pickup, dropoff)
+
+	if response == nil {
+		http.Error(w, "Invalid pickup or dropoff", http.StatusBadRequest)
+		return
+	}
 
 	data, err := json.Marshal(response)
 	if httperr.HandleError(w, err, http.StatusInternalServerError) {
@@ -99,7 +106,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func computeRoute(ctx context.Context, pickup, dropoff string) *Route {
+func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) *Route {
 	start := time.Now()
 	defer func() {
 		updateCalcStats(ctx, time.Since(start))
@@ -108,7 +115,19 @@ func computeRoute(ctx context.Context, pickup, dropoff string) *Route {
 	// Simulate expensive calculation
 	delay.Sleep(config.RouteCalcDelay, config.RouteCalcDelayStdDev)
 
-	eta := math.Max(2, rand.NormFloat64()*3+5)
+	pickups := strings.Split(pickup, ",")
+	ux, _ := strconv.ParseFloat(pickups[0], 64)
+	uy, _ := strconv.ParseFloat(pickups[1], 64)
+
+	dropoffs := strings.Split(dropoff, ",")
+	ox, _ := strconv.ParseFloat(dropoffs[0], 64)
+	oy, _ := strconv.ParseFloat(dropoffs[1], 64)
+
+	eta := math.Max(2, ((math.Abs(ox-ux) + math.Abs(oy-uy)) / 60.0))
+	if eta > 20 {
+		panic("Route calculation took too long")
+	}
+
 	return &Route{
 		Pickup:  pickup,
 		Dropoff: dropoff,
