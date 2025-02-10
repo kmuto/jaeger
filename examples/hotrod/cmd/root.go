@@ -80,9 +80,9 @@ func onInitialize() {
 		logger.Info("fix: disabling redis timeout")
 		config.FixRedisTimeout = true
 	}
-	if config.MaxRouteLength != maxRouteLength {
-		logger.Info("overriding max route length", zap.Int("old", config.MaxRouteLength), zap.Int("new", maxRouteLength))
-		config.MaxRouteLength = maxRouteLength
+	if config.MaxRouteDistance != maxRouteDistance {
+		logger.Info("overriding max route distance", zap.Int("old", config.MaxRouteDistance), zap.Int("new", maxRouteDistance))
+		config.MaxRouteDistance = maxRouteDistance
 	}
 	if customerPort != 8081 {
 		logger.Info("changing customer service port", zap.Int("old", 8081), zap.Int("new", customerPort))

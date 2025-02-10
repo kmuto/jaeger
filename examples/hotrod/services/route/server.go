@@ -133,8 +133,8 @@ func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) (*Rou
 	oy, _ := strconv.ParseFloat(dropoffs[1], 64)
 
 	eta := math.Max(2, ((math.Abs(ox-ux) + math.Abs(oy-uy)) / 60.0))
-	if eta > float64(config.MaxRouteLength) {
-		delay.Sleep(time.Duration(2000+rand.Intn(1500))*time.Millisecond, 0)
+	if eta > float64(config.MaxRouteDistance) {
+		delay.Sleep(time.Duration(1000+rand.Intn(1500))*time.Millisecond, 0)
 		return nil, errors.New("Route calculation is taking too long, timeout")
 	}
 

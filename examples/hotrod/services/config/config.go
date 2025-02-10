@@ -56,6 +56,6 @@ var (
 	// FixRedisTimeout controls whether to disable Redis timeout
 	FixRedisTimeout = false
 
-	// MaxRouteLength is the maximum length of a route
-	MaxRouteLength = 9999
+	// MaxRouteDistance is the maximum distance to calculate a route for
+	MaxRouteDistance = 9999
 )
