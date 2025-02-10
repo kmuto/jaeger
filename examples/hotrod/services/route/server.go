@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -91,14 +93,15 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response, err := s.computeRoute(ctx, pickup, dropoff)
-	if err != nil {
-		// want add here to record error as Span Event. Span is not available here yet. Create span here.
-		ctx, span := s.tracer.Tracer("route").Start(ctx, "computeRoute")
+	if httperr.HandleError(w, err, http.StatusInternalServerError) {
+		s.logger.For(ctx).Error("cannot compute a route", zap.Error(err))
+		// make OpenTelemetry Exception event for Mackerel tracing
+		span := trace.SpanFromContext(ctx)
 		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.AddEvent("Route computation failed", trace.WithAttributes(attribute.String("pickup", pickup), attribute.String("dropoff", dropoff)))
 		span.End()
-		s.logger.For(ctx).Error("invalid pickup or dropoff", zap.Error(err))
-		//panic(err.Error())
-		// http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -131,8 +134,8 @@ func (s *Server) computeRoute(ctx context.Context, pickup, dropoff string) (*Rou
 
 	eta := math.Max(2, ((math.Abs(ox-ux) + math.Abs(oy-uy)) / 60.0))
 	if eta > float64(config.MaxRouteLength) {
-		delay.Sleep(2*time.Second, 0)
-		return nil, errors.New("Route calculation took too long")
+		delay.Sleep(time.Duration(2000+rand.Intn(1500))*time.Millisecond, 0)
+		return nil, errors.New("Route calculation is taking too long, timeout")
 	}
 
 	return &Route{
