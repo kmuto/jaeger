@@ -61,7 +61,7 @@ services:
     image: kmuto:hotrod
     ports:
       - "8083:8080"
-    command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-R", "-m", "<p>最後に、特定操作で障害を発生させてみます。「Amazing Coffee Roasters」だけ、クリックしても様子がおかしいです。トレースを見てみましょう。リンクはないのでトレースツール側で調べてください。</p>"]
+    command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-L", "15", "-m", "<p>最後に、特定処理で障害を発生させてみます。何度かクリックしていると、詰まるような動作が発生します。ときには結果が返ってこないこともあります。トレースツール側で調べてみましょう。</p>"]
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
     networks:
