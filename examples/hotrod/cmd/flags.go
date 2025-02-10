@@ -18,6 +18,7 @@ var (
 	fixRouteWorkerPoolSize int
 	vip                    bool
 	fixRedisTimeout        bool
+	maxRouteDistance       int
 
 	customerPort int
 	driverPort   int
@@ -39,6 +40,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVarP(&vip, "crash-roasters", "R", false, "Cause roasters to crash")
 	cmd.PersistentFlags().BoolVarP(&fixRedisTimeout, "fix-redis-timeout", "S", false, "Avoid Redis timeout")
 	cmd.PersistentFlags().StringVarP(&frontMessage, "message", "m", "", "Message to display on the frontend")
+	cmd.PersistentFlags().IntVarP(&maxRouteDistance, "max-route-distance", "L", 9999, "Default route distance limit")
 
 	// Add flags to choose ports for services
 	cmd.PersistentFlags().IntVarP(&customerPort, "customer-service-port", "c", 8081, "Port for customer service")
