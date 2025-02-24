@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/flags"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
-	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
 )
 
@@ -27,7 +27,7 @@ func TestAllOptionSet(t *testing.T) {
 		Options.ServiceMetrics(metrics.NullFactory),
 		Options.Logger(zap.NewNop()),
 		Options.NumWorkers(5),
-		Options.PreProcessSpans(func(_ []*model.Span, _ /* tenant */ string) {}),
+		Options.PreProcessSpans(func(_ processor.Batch) {}),
 		Options.Sanitizer(func(span *model.Span) *model.Span { return span }),
 		Options.QueueSize(10),
 		Options.DynQueueSizeWarmup(1000),
@@ -53,7 +53,7 @@ func TestNoOptionsSet(t *testing.T) {
 	assert.Nil(t, opts.collectorTags)
 	assert.False(t, opts.reportBusy)
 	assert.False(t, opts.blockingSubmit)
-	assert.NotPanics(t, func() { opts.preProcessSpans(nil, "") })
+	assert.NotPanics(t, func() { opts.preProcessSpans(processor.SpansV1{}) })
 	assert.NotPanics(t, func() { opts.preSave(nil, "") })
 	assert.True(t, opts.spanFilter(nil))
 	span := model.Span{}

@@ -22,21 +22,24 @@ import (
 	cmdFlags "github.com/jaegertracing/jaeger/cmd/internal/flags"
 	"github.com/jaegertracing/jaeger/cmd/internal/printconfig"
 	"github.com/jaegertracing/jaeger/cmd/internal/status"
+	ss "github.com/jaegertracing/jaeger/internal/sampling/samplingstrategy/metafactory"
+	storage "github.com/jaegertracing/jaeger/internal/storage/v1/factory"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/pkg/config"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
+	"github.com/jaegertracing/jaeger/pkg/telemetry"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
 	"github.com/jaegertracing/jaeger/pkg/version"
-	ss "github.com/jaegertracing/jaeger/plugin/sampling/strategyprovider"
-	"github.com/jaegertracing/jaeger/plugin/storage"
 	"github.com/jaegertracing/jaeger/ports"
 )
 
 const serviceName = "jaeger-collector"
 
 func main() {
+	cmdFlags.PrintV1EOL()
 	svc := cmdFlags.NewService(ports.CollectorAdminHTTP)
 
-	storageFactory, err := storage.NewFactory(storage.FactoryConfigFromEnvAndCLI(os.Args, os.Stderr))
+	storageFactory, err := storage.NewFactory(storage.ConfigFromEnvAndCLI(os.Args, os.Stderr))
 	if err != nil {
 		log.Fatalf("Cannot initialize storage factory: %v", err)
 	}
@@ -52,8 +55,8 @@ func main() {
 	v := viper.New()
 	command := &cobra.Command{
 		Use:   "jaeger-collector",
-		Short: "Jaeger collector receives and processes traces from Jaeger agents and clients",
-		Long:  `Jaeger collector receives traces from Jaeger agents and runs them through a processing pipeline.`,
+		Short: "Jaeger collector receives and stores traces",
+		Long:  `Jaeger collector receives traces and runs them through a processing pipeline.`,
 		RunE: func(_ *cobra.Command, _ /* args */ []string) error {
 			if err := svc.Start(v); err != nil {
 				return err
@@ -63,8 +66,12 @@ func main() {
 			metricsFactory := baseFactory.Namespace(metrics.NSOptions{Name: "collector"})
 			version.NewInfoMetrics(metricsFactory)
 
+			baseTelset := telemetry.NoopSettings()
+			baseTelset.Logger = svc.Logger
+			baseTelset.Metrics = baseFactory
+
 			storageFactory.InitFromViper(v, logger)
-			if err := storageFactory.Initialize(baseFactory, logger); err != nil {
+			if err := storageFactory.Initialize(baseTelset.Metrics, baseTelset.Logger); err != nil {
 				logger.Fatal("Failed to init storage factory", zap.Error(err))
 			}
 			spanWriter, err := storageFactory.CreateSpanWriter()
@@ -89,13 +96,13 @@ func main() {
 			if err != nil {
 				logger.Fatal("Failed to initialize collector", zap.Error(err))
 			}
-			tm := tenancy.NewManager(&collectorOpts.GRPC.Tenancy)
+			tm := tenancy.NewManager(&collectorOpts.Tenancy)
 
 			collector := app.New(&app.CollectorParams{
 				ServiceName:        serviceName,
 				Logger:             logger,
 				MetricsFactory:     metricsFactory,
-				SpanWriter:         spanWriter,
+				TraceWriter:        v1adapter.NewTraceWriter(spanWriter),
 				SamplingProvider:   samplingProvider,
 				SamplingAggregator: samplingAggregator,
 				HealthCheck:        svc.HC(),

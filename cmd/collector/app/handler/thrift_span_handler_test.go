@@ -5,6 +5,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,13 +13,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/zipkincore"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
 	zipkinsanitizer "github.com/jaegertracing/jaeger/cmd/collector/app/sanitizer/zipkin"
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/thrift-gen/jaeger"
-	"github.com/jaegertracing/jaeger/thrift-gen/zipkincore"
 )
 
 func TestJaegerSpanHandler(t *testing.T) {
@@ -35,7 +37,7 @@ func TestJaegerSpanHandler(t *testing.T) {
 	for _, tc := range testChunks {
 		logger := zap.NewNop()
 		h := NewJaegerSpanHandler(logger, &shouldIErrorProcessor{tc.expectedErr != nil})
-		res, err := h.SubmitBatches([]*jaeger.Batch{
+		res, err := h.SubmitBatches(context.Background(), []*jaeger.Batch{
 			{
 				Process: &jaeger.Process{ServiceName: "someServiceName"},
 				Spans:   []*jaeger.Span{{SpanId: 21345}},
@@ -56,14 +58,24 @@ type shouldIErrorProcessor struct {
 	shouldError bool
 }
 
-var errTestError = errors.New("Whoops")
+var (
+	_            processor.SpanProcessor = (*shouldIErrorProcessor)(nil)
+	errTestError                         = errors.New("Whoops")
+)
 
-func (s *shouldIErrorProcessor) ProcessSpans(mSpans []*model.Span, _ processor.SpansOptions) ([]bool, error) {
+func (s *shouldIErrorProcessor) ProcessSpans(_ context.Context, batch processor.Batch) ([]bool, error) {
 	if s.shouldError {
 		return nil, errTestError
 	}
-	retMe := make([]bool, len(mSpans))
-	for i := range mSpans {
+	var spans []*model.Span
+	batch.GetSpans(func(sp []*model.Span) {
+		spans = sp
+	}, func(_ ptrace.Traces) {
+		panic("not implemented")
+	})
+
+	retMe := make([]bool, len(spans))
+	for i := range spans {
 		retMe[i] = true
 	}
 	return retMe, nil
@@ -113,7 +125,7 @@ func TestZipkinSpanHandler(t *testing.T) {
 					},
 				}
 			}
-			res, err := h.SubmitZipkinBatch(spans, SubmitBatchOptions{})
+			res, err := h.SubmitZipkinBatch(context.Background(), spans, SubmitBatchOptions{})
 			if tc.expectedErr != nil {
 				assert.Nil(t, res)
 				assert.Equal(t, tc.expectedErr, err)

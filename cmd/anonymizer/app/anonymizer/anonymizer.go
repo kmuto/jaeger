@@ -15,18 +15,18 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	uiconv "github.com/jaegertracing/jaeger/model/converter/json"
 	uimodel "github.com/jaegertracing/jaeger/model/json"
 )
 
 var allowedTags = map[string]bool{
-	"error":            true,
-	"span.kind":        true,
-	"http.method":      true,
-	"http.status_code": true,
-	"sampler.type":     true,
-	"sampler.param":    true,
+	"error":               true,
+	"http.method":         true,
+	"http.status_code":    true,
+	model.SpanKindKey:     true,
+	model.SamplerTypeKey:  true,
+	model.SamplerParamKey: true,
 }
 
 const PermUserRW = 0o600 // Read-write for owner only

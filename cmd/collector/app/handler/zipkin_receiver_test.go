@@ -22,13 +22,13 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
 
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/zipkincore"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/flags"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
 	zipkinthrift "github.com/jaegertracing/jaeger/model/converter/thrift/zipkin"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
 	"github.com/jaegertracing/jaeger/pkg/testutils"
 	zipkin_proto3 "github.com/jaegertracing/jaeger/proto-gen/zipkin"
-	"github.com/jaegertracing/jaeger/thrift-gen/zipkincore"
 )
 
 func TestZipkinReceiver(t *testing.T) {
@@ -37,7 +37,7 @@ func TestZipkinReceiver(t *testing.T) {
 	tm := &tenancy.Manager{}
 
 	opts := &flags.CollectorOptions{}
-	opts.Zipkin.HTTPHostPort = ":11911"
+	opts.Zipkin.Endpoint = ":11911"
 
 	rec, err := StartZipkinReceiver(opts, logger, spanProcessor, tm)
 	require.NoError(t, err)
@@ -138,19 +138,17 @@ func TestStartZipkinReceiver_Error(t *testing.T) {
 	tm := &tenancy.Manager{}
 
 	opts := &flags.CollectorOptions{}
-	opts.Zipkin.HTTPHostPort = ":-1"
+	opts.Zipkin.Endpoint = ":-1"
 
 	_, err := StartZipkinReceiver(opts, logger, spanProcessor, tm)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "could not start Zipkin receiver")
+	require.ErrorContains(t, err, "could not start Zipkin receiver")
 
 	newTraces := func(consumer.ConsumeTracesFunc, ...consumer.Option) (consumer.Traces, error) {
 		return nil, errors.New("mock error")
 	}
 	f := zipkinreceiver.NewFactory()
-	_, err = startZipkinReceiver(opts, logger, spanProcessor, tm, f, newTraces, f.CreateTracesReceiver)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "could not create Zipkin consumer")
+	_, err = startZipkinReceiver(opts, logger, spanProcessor, tm, f, newTraces, f.CreateTraces)
+	require.ErrorContains(t, err, "could not create Zipkin consumer")
 
 	createTracesReceiver := func(
 		context.Context, receiver.Settings, component.Config, consumer.Traces,
@@ -158,6 +156,5 @@ func TestStartZipkinReceiver_Error(t *testing.T) {
 		return nil, errors.New("mock error")
 	}
 	_, err = startZipkinReceiver(opts, logger, spanProcessor, tm, f, consumer.NewTraces, createTracesReceiver)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "could not create Zipkin receiver")
+	assert.ErrorContains(t, err, "could not create Zipkin receiver")
 }

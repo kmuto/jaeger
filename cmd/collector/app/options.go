@@ -7,10 +7,10 @@ package app
 import (
 	"go.uber.org/zap"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/flags"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/sanitizer"
-	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
 )
 
@@ -71,9 +71,9 @@ func (options) PreProcessSpans(preProcessSpans ProcessSpans) Option {
 }
 
 // Sanitizer creates an Option that initializes the sanitizer function
-func (options) Sanitizer(sanitizer sanitizer.SanitizeSpan) Option {
+func (options) Sanitizer(spanSanitizer sanitizer.SanitizeSpan) Option {
 	return func(b *options) {
-		b.sanitizer = sanitizer
+		b.sanitizer = spanSanitizer
 	}
 }
 
@@ -176,7 +176,7 @@ func (options) apply(opts ...Option) options {
 		ret.hostMetrics = metrics.NullFactory
 	}
 	if ret.preProcessSpans == nil {
-		ret.preProcessSpans = func(_ []*model.Span, _ /* tenant */ string) {}
+		ret.preProcessSpans = func(_ processor.Batch) {}
 	}
 	if ret.sanitizer == nil {
 		ret.sanitizer = func(span *model.Span) *model.Span { return span }

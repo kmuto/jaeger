@@ -11,7 +11,8 @@ processors:
     # データベースへのクエリ実行やアプリケーションの処理の 1 部分などをスパンとして表現できます。
     # https://opentelemetry.io/docs/concepts/signals/traces/#spans
     # Vaxila には Mackerel の 1 オーガニゼーションあたり月間 500 万スパンまで送信できます
-    timeout: 1m
+    #timeout: 1m
+    timeout: 15s
     send_batch_size: 5000
     send_batch_max_size: 5000
   resource/namespace:

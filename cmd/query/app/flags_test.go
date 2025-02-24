@@ -5,19 +5,20 @@
 package app
 
 import (
-	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/config/configopaque"
 	"go.uber.org/zap"
 
+	spanstoremocks "github.com/jaegertracing/jaeger/internal/storage/v1/api/spanstore/mocks"
+	storage "github.com/jaegertracing/jaeger/internal/storage/v1/factory"
 	"github.com/jaegertracing/jaeger/pkg/config"
+	"github.com/jaegertracing/jaeger/pkg/testutils"
 	"github.com/jaegertracing/jaeger/ports"
-	"github.com/jaegertracing/jaeger/storage/mocks"
-	spanstore_mocks "github.com/jaegertracing/jaeger/storage/spanstore/mocks"
 )
 
 func TestQueryBuilderFlags(t *testing.T) {
@@ -35,16 +36,16 @@ func TestQueryBuilderFlags(t *testing.T) {
 	})
 	qOpts, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
 	require.NoError(t, err)
-	assert.Equal(t, "/dev/null", qOpts.StaticAssets.Path)
-	assert.True(t, qOpts.StaticAssets.LogAccess)
-	assert.Equal(t, "some.json", qOpts.UIConfig)
+	assert.Equal(t, "/dev/null", qOpts.UIConfig.AssetsPath)
+	assert.True(t, qOpts.UIConfig.LogAccess)
+	assert.Equal(t, "some.json", qOpts.UIConfig.ConfigFile)
 	assert.Equal(t, "/jaeger", qOpts.BasePath)
-	assert.Equal(t, "127.0.0.1:8080", qOpts.HTTPHostPort)
-	assert.Equal(t, "127.0.0.1:8081", qOpts.GRPCHostPort)
-	assert.Equal(t, http.Header{
-		"Access-Control-Allow-Origin": []string{"blerg"},
-		"Whatever":                    []string{"thing"},
-	}, qOpts.AdditionalHeaders)
+	assert.Equal(t, "127.0.0.1:8080", qOpts.HTTP.Endpoint)
+	assert.Equal(t, "127.0.0.1:8081", qOpts.GRPC.NetAddr.Endpoint)
+	assert.Equal(t, map[string]configopaque.String{
+		"Access-Control-Allow-Origin": "blerg",
+		"Whatever":                    "thing",
+	}, qOpts.HTTP.ResponseHeaders)
 	assert.Equal(t, 10*time.Second, qOpts.MaxClockSkewAdjust)
 }
 
@@ -55,7 +56,7 @@ func TestQueryBuilderBadHeadersFlags(t *testing.T) {
 	})
 	qOpts, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
 	require.NoError(t, err)
-	assert.Nil(t, qOpts.AdditionalHeaders)
+	assert.Nil(t, qOpts.HTTP.ResponseHeaders)
 }
 
 func TestStringSliceAsHeader(t *testing.T) {
@@ -86,33 +87,66 @@ func TestStringSliceAsHeader(t *testing.T) {
 }
 
 func TestBuildQueryServiceOptions(t *testing.T) {
-	v, _ := config.Viperize(AddFlags)
-	qOpts, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
-	require.NoError(t, err)
-	assert.NotNil(t, qOpts)
-
-	qSvcOpts := qOpts.BuildQueryServiceOptions(&mocks.Factory{}, zap.NewNop())
-	assert.NotNil(t, qSvcOpts)
-	assert.NotNil(t, qSvcOpts.Adjuster)
-	assert.Nil(t, qSvcOpts.ArchiveSpanReader)
-	assert.Nil(t, qSvcOpts.ArchiveSpanWriter)
-
-	comboFactory := struct {
-		*mocks.Factory
-		*mocks.ArchiveFactory
+	tests := []struct {
+		name             string
+		initFn           func() (*storage.ArchiveStorage, error)
+		expectNilStorage bool
+		expectedLogEntry string
 	}{
-		&mocks.Factory{},
-		&mocks.ArchiveFactory{},
+		{
+			name: "successful initialization",
+			initFn: func() (*storage.ArchiveStorage, error) {
+				return &storage.ArchiveStorage{
+					Reader: &spanstoremocks.Reader{},
+					Writer: &spanstoremocks.Writer{},
+				}, nil
+			},
+			expectNilStorage: false,
+		},
+		{
+			name: "error initializing archive storage",
+			initFn: func() (*storage.ArchiveStorage, error) {
+				return nil, assert.AnError
+			},
+			expectNilStorage: true,
+			expectedLogEntry: "Received an error when trying to initialize archive storage",
+		},
+		{
+			name: "no archive storage",
+			initFn: func() (*storage.ArchiveStorage, error) {
+				return nil, nil
+			},
+			expectNilStorage: true,
+			expectedLogEntry: "Archive storage not initialized",
+		},
 	}
 
-	comboFactory.ArchiveFactory.On("CreateArchiveSpanReader").Return(&spanstore_mocks.Reader{}, nil)
-	comboFactory.ArchiveFactory.On("CreateArchiveSpanWriter").Return(&spanstore_mocks.Writer{}, nil)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			v, _ := config.Viperize(AddFlags)
+			qOpts, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
+			require.NoError(t, err)
+			require.NotNil(t, qOpts)
 
-	qSvcOpts = qOpts.BuildQueryServiceOptions(comboFactory, zap.NewNop())
-	assert.NotNil(t, qSvcOpts)
-	assert.NotNil(t, qSvcOpts.Adjuster)
-	assert.NotNil(t, qSvcOpts.ArchiveSpanReader)
-	assert.NotNil(t, qSvcOpts.ArchiveSpanWriter)
+			logger, logBuf := testutils.NewLogger()
+			qSvcOpts, v2qSvcOpts := qOpts.BuildQueryServiceOptions(test.initFn, logger)
+			require.Equal(t, defaultMaxClockSkewAdjust, qSvcOpts.MaxClockSkewAdjust)
+
+			if test.expectNilStorage {
+				require.Nil(t, qSvcOpts.ArchiveSpanReader)
+				require.Nil(t, qSvcOpts.ArchiveSpanWriter)
+				require.Nil(t, v2qSvcOpts.ArchiveTraceReader)
+				require.Nil(t, v2qSvcOpts.ArchiveTraceWriter)
+			} else {
+				require.NotNil(t, qSvcOpts.ArchiveSpanReader)
+				require.NotNil(t, qSvcOpts.ArchiveSpanWriter)
+				require.NotNil(t, v2qSvcOpts.ArchiveTraceReader)
+				require.NotNil(t, v2qSvcOpts.ArchiveTraceWriter)
+			}
+
+			require.Contains(t, logBuf.String(), test.expectedLogEntry)
+		})
+	}
 }
 
 func TestQueryOptionsPortAllocationFromFlags(t *testing.T) {
@@ -140,18 +174,6 @@ func TestQueryOptionsPortAllocationFromFlags(t *testing.T) {
 			expectedHTTPHostPort: "127.0.0.1:8081",
 			expectedGRPCHostPort: ports.PortToHostPort(ports.QueryGRPC), // fallback in viper
 		},
-		{
-			// Allows usage of common host-ports.  Flags allow this irrespective of TLS status
-			// The server with TLS enabled with equal HTTP & GRPC host-ports, is still an acceptable flag configuration, but will throw an error during initialisation
-			name: "Common equal host-port specified, TLS enabled in atleast one server",
-			flagsArray: []string{
-				"--query.grpc.tls.enabled=true",
-				"--query.http-server.host-port=127.0.0.1:8081",
-				"--query.grpc-server.host-port=127.0.0.1:8081",
-			},
-			expectedHTTPHostPort: "127.0.0.1:8081",
-			expectedGRPCHostPort: "127.0.0.1:8081",
-		},
 	}
 
 	for _, test := range flagPortCases {
@@ -161,8 +183,8 @@ func TestQueryOptionsPortAllocationFromFlags(t *testing.T) {
 			qOpts, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
 			require.NoError(t, err)
 
-			assert.Equal(t, test.expectedHTTPHostPort, qOpts.HTTPHostPort)
-			assert.Equal(t, test.expectedGRPCHostPort, qOpts.GRPCHostPort)
+			assert.Equal(t, test.expectedHTTPHostPort, qOpts.HTTP.Endpoint)
+			assert.Equal(t, test.expectedGRPCHostPort, qOpts.GRPC.NetAddr.Endpoint)
 		})
 	}
 }
@@ -178,8 +200,24 @@ func TestQueryOptions_FailedTLSFlags(t *testing.T) {
 			})
 			require.NoError(t, err)
 			_, err = new(QueryOptions).InitFromViper(v, zap.NewNop())
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "failed to process "+test+" TLS options")
+			assert.ErrorContains(t, err, "failed to process "+test+" TLS options")
 		})
 	}
+}
+
+func TestQueryOptions_SamePortsError(t *testing.T) {
+	v, command := config.Viperize(AddFlags)
+	command.ParseFlags([]string{
+		"--query.http-server.host-port=127.0.0.1:8081",
+		"--query.grpc-server.host-port=127.0.0.1:8081",
+	})
+	_, err := new(QueryOptions).InitFromViper(v, zap.NewNop())
+	require.ErrorContains(t, err, "using the same port for gRPC and HTTP is not supported")
+}
+
+func TestDefaultQueryOptions(t *testing.T) {
+	qo := DefaultQueryOptions()
+	require.Equal(t, ":16686", qo.HTTP.Endpoint)
+	require.Equal(t, ":16685", qo.GRPC.NetAddr.Endpoint)
+	require.EqualValues(t, "tcp", qo.GRPC.NetAddr.Transport)
 }

@@ -9,10 +9,8 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
@@ -37,7 +35,7 @@ func StartZipkinReceiver(
 		tm,
 		zipkinFactory,
 		consumer.NewTraces,
-		zipkinFactory.CreateTracesReceiver,
+		zipkinFactory.CreateTraces,
 	)
 }
 
@@ -56,29 +54,24 @@ func startZipkinReceiver(
 		cfg component.Config, nextConsumer consumer.Traces) (receiver.Traces, error),
 ) (receiver.Traces, error) {
 	receiverConfig := zipkinFactory.CreateDefaultConfig().(*zipkinreceiver.Config)
-	applyHTTPSettings(&receiverConfig.ServerConfig, &flags.HTTPOptions{
-		HostPort: options.Zipkin.HTTPHostPort,
-		TLS:      options.Zipkin.TLS,
-		CORS:     options.HTTP.CORS,
-		// TODO keepAlive not supported?
-	})
+	receiverConfig.ServerConfig = options.Zipkin.ServerConfig
 	receiverSettings := receiver.Settings{
 		TelemetrySettings: component.TelemetrySettings{
 			Logger:         logger,
 			TracerProvider: nooptrace.NewTracerProvider(),
-			// TODO wire this with jaegerlib metrics?
-			LeveledMeterProvider: func(_ configtelemetry.Level) metric.MeterProvider {
-				return noopmetric.NewMeterProvider()
-			},
-			MeterProvider: noopmetric.NewMeterProvider(),
+			MeterProvider:  noopmetric.NewMeterProvider(),
 		},
 	}
 
-	consumerAdapter := newConsumerDelegate(logger, spanProcessor, tm)
-	// reset Zipkin spanFormat
-	consumerAdapter.batchConsumer.spanOptions.SpanFormat = processor.ZipkinSpanFormat
+	consumerHelper := &consumerHelper{
+		batchConsumer: newBatchConsumer(logger,
+			spanProcessor,
+			processor.HTTPTransport,
+			processor.ZipkinSpanFormat,
+			tm),
+	}
 
-	nextConsumer, err := newTraces(consumerAdapter.consume)
+	nextConsumer, err := newTraces(consumerHelper.consume)
 	if err != nil {
 		return nil, fmt.Errorf("could not create Zipkin consumer: %w", err)
 	}

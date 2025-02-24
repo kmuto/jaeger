@@ -7,17 +7,16 @@ package adjuster
 import (
 	"fmt"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 // SpanReferences creates an adjuster that removes invalid span references, e.g. with traceID==0
 func SpanReferences() Adjuster {
-	return Func(func(trace *model.Trace) (*model.Trace, error) {
+	return Func(func(trace *model.Trace) {
 		adjuster := spanReferenceAdjuster{}
 		for _, span := range trace.Spans {
 			adjuster.adjust(span)
 		}
-		return trace, nil
 	})
 }
 

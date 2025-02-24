@@ -16,9 +16,9 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
 	"github.com/jaegertracing/jaeger/internal/metricstest"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
-	"github.com/jaegertracing/jaeger/thrift-gen/jaeger"
 )
 
 var _ io.Closer = (*ProxyBuilder)(nil)
@@ -70,7 +70,7 @@ func initializeGRPCTestServer(t *testing.T, beforeServe func(server *grpc.Server
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		require.NoError(t, server.Serve(lis))
+		assert.NoError(t, server.Serve(lis))
 		wg.Done()
 	}()
 	t.Cleanup(func() {

@@ -7,25 +7,26 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
 	"github.com/jaegertracing/jaeger/cmd/query/app"
 	"github.com/jaegertracing/jaeger/cmd/query/app/querysvc"
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/plugin/metrics/disabled"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
-	dependencyStoreMocks "github.com/jaegertracing/jaeger/storage/dependencystore/mocks"
-	"github.com/jaegertracing/jaeger/storage/spanstore"
-	spanstoremocks "github.com/jaegertracing/jaeger/storage/spanstore/mocks"
+	"github.com/jaegertracing/jaeger/internal/storage/v1/api/spanstore"
+	spanstoremocks "github.com/jaegertracing/jaeger/internal/storage/v1/api/spanstore/mocks"
+	dependencyStoreMocks "github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore/mocks"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 )
 
 var (
-	matchContext = mock.AnythingOfType("*context.valueCtx")
-	matchTraceID = mock.AnythingOfType("model.TraceID")
+	matchContext            = mock.AnythingOfType("*context.valueCtx")
+	matchGetTraceParameters = mock.AnythingOfType("spanstore.GetTraceParameters")
 
 	mockInvalidTraceID = "xyz"
 	mockTraceID        = model.NewTraceID(0, 123456)
@@ -55,15 +56,14 @@ type testServer struct {
 
 func newTestServer(t *testing.T) *testServer {
 	spanReader := &spanstoremocks.Reader{}
-	metricsReader, err := disabled.NewMetricsReader()
-	require.NoError(t, err)
+	traceReader := v1adapter.NewTraceReader(spanReader)
 
 	q := querysvc.NewQueryService(
-		spanReader,
+		traceReader,
 		&dependencyStoreMocks.Reader{},
 		querysvc.QueryServiceOptions{},
 	)
-	h := app.NewGRPCHandler(q, metricsReader, app.GRPCHandlerOptions{})
+	h := app.NewGRPCHandler(q, app.GRPCHandlerOptions{})
 
 	server := grpc.NewServer()
 	api_v2.RegisterQueryServiceServer(server, h)
@@ -74,7 +74,7 @@ func newTestServer(t *testing.T) *testServer {
 	var exited sync.WaitGroup
 	exited.Add(1)
 	go func() {
-		require.NoError(t, server.Serve(lis))
+		assert.NoError(t, server.Serve(lis))
 		exited.Done()
 	}()
 	t.Cleanup(func() {
@@ -106,24 +106,31 @@ func TestQueryTrace(t *testing.T) {
 	defer q.Close()
 
 	t.Run("No error", func(t *testing.T) {
-		s.spanReader.On("GetTrace", matchContext, matchTraceID).Return(
+		startTime := time.Date(1970, time.January, 1, 0, 0, 0, 1000, time.UTC)
+		endTime := time.Date(1970, time.January, 1, 0, 0, 0, 2000, time.UTC)
+		expectedGetTraceParameters := spanstore.GetTraceParameters{
+			TraceID:   mockTraceID,
+			StartTime: startTime,
+			EndTime:   endTime,
+		}
+		s.spanReader.On("GetTrace", matchContext, expectedGetTraceParameters).Return(
 			mockTraceGRPC, nil).Once()
 
-		spans, err := q.QueryTrace(mockTraceID.String())
+		spans, err := q.QueryTrace(mockTraceID.String(), startTime, endTime)
 		require.NoError(t, err)
 		assert.Equal(t, len(spans), len(mockTraceGRPC.Spans))
 	})
 
 	t.Run("Invalid TraceID", func(t *testing.T) {
-		_, err := q.QueryTrace(mockInvalidTraceID)
+		_, err := q.QueryTrace(mockInvalidTraceID, time.Time{}, time.Time{})
 		assert.ErrorContains(t, err, "failed to convert the provided trace id")
 	})
 
 	t.Run("Trace not found", func(t *testing.T) {
-		s.spanReader.On("GetTrace", matchContext, matchTraceID).Return(
+		s.spanReader.On("GetTrace", matchContext, matchGetTraceParameters).Return(
 			nil, spanstore.ErrTraceNotFound).Once()
 
-		spans, err := q.QueryTrace(mockTraceID.String())
+		spans, err := q.QueryTrace(mockTraceID.String(), time.Time{}, time.Time{})
 		assert.Nil(t, spans)
 		assert.ErrorIs(t, err, spanstore.ErrTraceNotFound)
 	})

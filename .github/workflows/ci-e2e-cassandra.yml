@@ -1,14 +1,10 @@
 name: CIT Cassandra
 
 on:
-  push:
-    branches: [main]
-
-  pull_request:
-    branches: [main]
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.event.pull_request && github.event.pull_request.number) || github.ref || github.run_id }}
+  group: cit-cassandra-${{ github.workflow }}-${{ (github.event.pull_request && github.event.pull_request.number) || github.ref || github.run_id }}
   cancel-in-progress: true
 
 # See https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions
@@ -19,8 +15,10 @@ jobs:
   cassandra:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         jaeger-version: [v1, v2]
+        create-schema: [manual, auto]
         version:
         - distribution: cassandra
           major: 4.x
@@ -28,25 +26,39 @@ jobs:
         - distribution: cassandra
           major: 5.x
           schema: v004
-    name: ${{ matrix.version.distribution }} ${{ matrix.version.major }} ${{ matrix.jaeger-version }}
+        exclude:
+        # Exclude v1 as create schema on fly is available for v2 only
+        - jaeger-version: v1
+          create-schema: auto
+    name: ${{ matrix.version.distribution }}-${{ matrix.version.major }} ${{ matrix.jaeger-version }} schema=${{ matrix.create-schema }}
     steps:
     - name: Harden Runner
-      uses: step-security/harden-runner@0d381219ddf674d61a7572ddd19d7941e271515c # v2.9.0
+      uses: step-security/harden-runner@91182cccc01eb5e619899d80e4e971d6181294a7 # v2.10.1
       with:
         egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
 
-    - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+    - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
       with:
-        go-version: 1.23.x
+        go-version: 1.24.x
 
     - name: Run cassandra integration tests
       id: test-execution
-      run: bash scripts/cassandra-integration-test.sh ${{ matrix.version.major }} ${{ matrix.version.schema }} ${{ matrix.jaeger-version }}
+      run: bash scripts/e2e/cassandra.sh ${{ matrix.version.major }} ${{ matrix.version.schema }} ${{ matrix.jaeger-version }}
+      env:
+        SKIP_APPLY_SCHEMA: ${{ matrix.create-schema == 'auto' && true || false }}
+     
+    - uses: ./.github/actions/verify-metrics-snapshot
+      if: matrix.jaeger-version == 'v2'
+      with:
+        snapshot: metrics_snapshot_cassandra
+        artifact_key: metrics_snapshot_cassandras_${{ matrix.version.major }}_${{ matrix.version.schema }}_${{ matrix.jaeger-version }}_${{ matrix.create-schema }}
 
     - name: Upload coverage to codecov
       uses: ./.github/actions/upload-codecov
       with:
         files: cover.out
-        flags: cassandra-${{ matrix.version.major }}-${{ matrix.jaeger-version }}
+        flags: cassandra-${{ matrix.version.major }}-${{ matrix.jaeger-version }}-${{ matrix.create-schema }}
+    
+    

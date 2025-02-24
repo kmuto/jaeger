@@ -1,5 +1,5 @@
 <html>
-  <meta charset="ISO-8859-1">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
   <head>
     <title>HotROD - Rides On Demand</title>
@@ -13,12 +13,16 @@
 .hotrod-button:hover { cursor: pointer; filter: brightness(85%); }
 #hotrod-log { margin-top: 15px; }
 #tip { margin-top: 15px; }
+.desc { font-size: small; }
     </style>
 
   </head>
   <body>
     <div class="container">
       <div class="uuid alert alert-info"></div>
+      <div class="desc"><p>タクシー配車システムのデモです。「Rachel's Floral Designs」のような4つの青ボタンは顧客名を表し、クリックすると近辺のタクシー群からルート検索で到着時間の短いものが1台選出されて配車実行されます。タクシーにはそれぞれT〜のようなナンバープレートが付いています。ナンバープレートはランダムで、車の再利用もされません。到着までの時間が表示されますがこれも意味はありません。</p>
+        <p>トレースが登録されるまでにはおおよそ1分程度待つ必要があります。</p></div>
+      <div class="desc ddesc"></div>
       <center>
         <h1>Hot R.O.D.</h1>
         <h4>🚗 <em>Rides On Demand</em> 🚗</h4>
@@ -97,6 +101,7 @@ $(".hotrod-button").click(function(evt) {
     success: function(data, textStatus) {
       console.log('config', data);
       config = data;
+      $(".ddesc").html(config['frontMessage']);
     },
   });
 
@@ -118,10 +123,10 @@ $(".hotrod-button").click(function(evt) {
         // const findURL = `/search?limit=20&lookback=1h&service=frontend&tags=%7B%22driver%22%3A%22${data.Driver}%22%7D`;
         const findURL = `?page=1&service=frontend&q=attributes%2Fdriver%3A${data.Driver}`;
         // traceLink = ` [<a href="${jaeger}${findURL}" target="_blank">find trace</a>]`;
-        traceLink = ` [<a href="https://mackerel.io/vaxila/traces${findURL}" target="vaxila">find trace</a>]`;
+        //traceLink = ` [<a href="https://mackerel.io/vaxila/traces${findURL}" target="vaxila">find trace</a>]`;
         if (traceID) {
           //traceLink += ` [<a href="${jaeger}/trace/${traceID}" target="_blank">open trace</a>]`;
-          traceLink += ` [<a href="https://mackerel.io/vaxila/traces/${traceID}" target="vaxila">open trace</a>]`;
+          traceLink += ` [<a href="https://mackerel.io/my/tracing/traces/${traceID}" target="vaxila">Mackerel</a>] [<a href="${jaeger}/trace/${traceID}" target="jaeger">jaeger</a>]`;
         }
       }
       freshCar.html(`HotROD <b>${data.Driver}</b> arriving in ${duration} [req: ${requestID}, latency: ${after-before}ms] ${traceLink}`);

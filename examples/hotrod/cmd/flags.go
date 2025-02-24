@@ -16,14 +16,18 @@ var (
 	fixDBConnDelay         time.Duration
 	fixDBConnDisableMutex  bool
 	fixRouteWorkerPoolSize int
+	vip                    bool
+	fixRedisTimeout        bool
+	maxRouteDistance       int
 
 	customerPort int
 	driverPort   int
 	frontendPort int
 	routePort    int
 
-	basepath string
-	jaegerUI string
+	basepath     string
+	jaegerUI     string
+	frontMessage string
 )
 
 // used by root command
@@ -33,6 +37,10 @@ func addFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().DurationVarP(&fixDBConnDelay, "fix-db-query-delay", "D", 300*time.Millisecond, "Average latency of MySQL DB query")
 	cmd.PersistentFlags().BoolVarP(&fixDBConnDisableMutex, "fix-disable-db-conn-mutex", "M", false, "Disables the mutex guarding db connection")
 	cmd.PersistentFlags().IntVarP(&fixRouteWorkerPoolSize, "fix-route-worker-pool-size", "W", 3, "Default worker pool size")
+	cmd.PersistentFlags().BoolVarP(&vip, "crash-roasters", "R", false, "Cause roasters to crash")
+	cmd.PersistentFlags().BoolVarP(&fixRedisTimeout, "fix-redis-timeout", "S", false, "Avoid Redis timeout")
+	cmd.PersistentFlags().StringVarP(&frontMessage, "message", "m", "", "Message to display on the frontend")
+	cmd.PersistentFlags().IntVarP(&maxRouteDistance, "max-route-distance", "L", 9999, "Default route distance limit")
 
 	// Add flags to choose ports for services
 	cmd.PersistentFlags().IntVarP(&customerPort, "customer-service-port", "c", 8081, "Port for customer service")

@@ -16,15 +16,20 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/collector/config/configgrpc"
+	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/confignet"
+	"go.opentelemetry.io/collector/config/configopaque"
 	"go.uber.org/zap"
 
 	"github.com/jaegertracing/jaeger/cmd/query/app/querysvc"
-	"github.com/jaegertracing/jaeger/model/adjuster"
+	v2querysvc "github.com/jaegertracing/jaeger/cmd/query/app/querysvc/v2/querysvc"
+	storage "github.com/jaegertracing/jaeger/internal/storage/v1/factory"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/pkg/config"
 	"github.com/jaegertracing/jaeger/pkg/config/tlscfg"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
 	"github.com/jaegertracing/jaeger/ports"
-	"github.com/jaegertracing/jaeger/storage"
 )
 
 const (
@@ -40,6 +45,10 @@ const (
 	queryEnableTracing         = "query.enable-tracing"
 )
 
+const (
+	defaultMaxClockSkewAdjust = 0 * time.Second
+)
+
 var tlsGRPCFlagsConfig = tlscfg.ServerFlagsConfig{
 	Prefix: "query.grpc",
 }
@@ -48,47 +57,33 @@ var tlsHTTPFlagsConfig = tlscfg.ServerFlagsConfig{
 	Prefix: "query.http",
 }
 
-// QueryOptionsStaticAssets contains configuration for handling static assets
-type QueryOptionsStaticAssets struct {
-	// Path is the path for the static assets for the UI (https://github.com/uber/jaeger-ui)
-	Path string `valid:"optional" mapstructure:"path"`
-	// LogAccess tells static handler to log access to static assets, useful in debugging
-	LogAccess bool `valid:"optional" mapstructure:"log_access"`
+type UIConfig struct {
+	// ConfigFile is the path to a configuration file for the UI.
+	ConfigFile string `mapstructure:"config_file" valid:"optional"`
+	// AssetsPath is the path for the static assets for the UI (https://github.com/uber/jaeger-ui).
+	AssetsPath string `mapstructure:"assets_path" valid:"optional" `
+	// LogAccess tells static handler to log access to static assets, useful in debugging.
+	LogAccess bool `mapstructure:"log_access" valid:"optional"`
 }
 
-// QueryOptionsBase holds configuration for query service shared with jaeger(v2)
-type QueryOptionsBase struct {
-	// BasePath is the base path for all HTTP routes
-	BasePath string
-
-	StaticAssets QueryOptionsStaticAssets `valid:"optional" mapstructure:"static_assets"`
-
-	// UIConfig is the path to a configuration file for the UI
-	UIConfig string `valid:"optional" mapstructure:"ui_config"`
-	// BearerTokenPropagation activate/deactivate bearer token propagation to storage
-	BearerTokenPropagation bool
-	// AdditionalHeaders
-	AdditionalHeaders http.Header
-	// MaxClockSkewAdjust is the maximum duration by which jaeger-query will adjust a span
-	MaxClockSkewAdjust time.Duration
-	// Tenancy configures tenancy for query
-	Tenancy tenancy.Options
-	// EnableTracing determines whether traces will be emitted by jaeger-query.
-	EnableTracing bool
-}
-
-// QueryOptions holds configuration for query service
+// QueryOptions holds configuration for query service shared with jaeger-v2
 type QueryOptions struct {
-	QueryOptionsBase
-
-	// HTTPHostPort is the host:port address that the query service listens in on for http requests
-	HTTPHostPort string
-	// GRPCHostPort is the host:port address that the query service listens in on for gRPC requests
-	GRPCHostPort string
-	// TLSGRPC configures secure transport (Consumer to Query service GRPC API)
-	TLSGRPC tlscfg.Options
-	// TLSHTTP configures secure transport (Consumer to Query service HTTP API)
-	TLSHTTP tlscfg.Options
+	// BasePath is the base path for all HTTP routes.
+	BasePath string `mapstructure:"base_path"`
+	// UIConfig contains configuration related to the Jaeger UIConfig.
+	UIConfig UIConfig `mapstructure:"ui"`
+	// BearerTokenPropagation activate/deactivate bearer token propagation to storage.
+	BearerTokenPropagation bool `mapstructure:"bearer_token_propagation"`
+	// Tenancy holds the multi-tenancy configuration.
+	Tenancy tenancy.Options `mapstructure:"multi_tenancy"`
+	// MaxClockSkewAdjust is the maximum duration by which jaeger-query will adjust a span.
+	MaxClockSkewAdjust time.Duration `mapstructure:"max_clock_skew_adjust"  valid:"optional"`
+	// EnableTracing determines whether traces will be emitted by jaeger-query.
+	EnableTracing bool `mapstructure:"enable_tracing"`
+	// HTTP holds the HTTP configuration that the query service uses to serve requests.
+	HTTP confighttp.ServerConfig `mapstructure:"http"`
+	// GRPC holds the GRPC configuration that the query service uses to serve requests.
+	GRPC configgrpc.ServerConfig `mapstructure:"grpc"`
 }
 
 // AddFlags adds flags for QueryOptions
@@ -101,7 +96,7 @@ func AddFlags(flagSet *flag.FlagSet) {
 	flagSet.Bool(queryLogStaticAssetsAccess, false, "Log when static assets are accessed (for debugging)")
 	flagSet.String(queryUIConfig, "", "The path to the UI configuration file in JSON format")
 	flagSet.Bool(queryTokenPropagation, false, "Allow propagation of bearer token to be used by storage plugins")
-	flagSet.Duration(queryMaxClockSkewAdjust, 0, "The maximum delta by which span timestamps may be adjusted in the UI due to clock skew; set to 0s to disable clock skew adjustments")
+	flagSet.Duration(queryMaxClockSkewAdjust, defaultMaxClockSkewAdjust, "The maximum delta by which span timestamps may be adjusted in the UI due to clock skew; set to 0s to disable clock skew adjustments")
 	flagSet.Bool(queryEnableTracing, false, "Enables emitting jaeger-query traces")
 	tlsGRPCFlagsConfig.AddFlags(flagSet)
 	tlsHTTPFlagsConfig.AddFlags(flagSet)
@@ -109,22 +104,27 @@ func AddFlags(flagSet *flag.FlagSet) {
 
 // InitFromViper initializes QueryOptions with properties from viper
 func (qOpts *QueryOptions) InitFromViper(v *viper.Viper, logger *zap.Logger) (*QueryOptions, error) {
-	qOpts.HTTPHostPort = v.GetString(queryHTTPHostPort)
-	qOpts.GRPCHostPort = v.GetString(queryGRPCHostPort)
+	qOpts.HTTP.Endpoint = v.GetString(queryHTTPHostPort)
+	qOpts.GRPC.NetAddr.Endpoint = v.GetString(queryGRPCHostPort)
+	// TODO: drop support for same host ports
+	// https://github.com/jaegertracing/jaeger/issues/6117
+	if qOpts.HTTP.Endpoint == qOpts.GRPC.NetAddr.Endpoint {
+		return qOpts, errors.New("using the same port for gRPC and HTTP is not supported - use dedidcated ports instead")
+	}
 	tlsGrpc, err := tlsGRPCFlagsConfig.InitFromViper(v)
 	if err != nil {
 		return qOpts, fmt.Errorf("failed to process gRPC TLS options: %w", err)
 	}
-	qOpts.TLSGRPC = tlsGrpc
+	qOpts.GRPC.TLSSetting = tlsGrpc
 	tlsHTTP, err := tlsHTTPFlagsConfig.InitFromViper(v)
 	if err != nil {
 		return qOpts, fmt.Errorf("failed to process HTTP TLS options: %w", err)
 	}
-	qOpts.TLSHTTP = tlsHTTP
+	qOpts.HTTP.TLSSetting = tlsHTTP
 	qOpts.BasePath = v.GetString(queryBasePath)
-	qOpts.StaticAssets.Path = v.GetString(queryStaticFiles)
-	qOpts.StaticAssets.LogAccess = v.GetBool(queryLogStaticAssetsAccess)
-	qOpts.UIConfig = v.GetString(queryUIConfig)
+	qOpts.UIConfig.AssetsPath = v.GetString(queryStaticFiles)
+	qOpts.UIConfig.LogAccess = v.GetBool(queryLogStaticAssetsAccess)
+	qOpts.UIConfig.ConfigFile = v.GetString(queryUIConfig)
 	qOpts.BearerTokenPropagation = v.GetBool(queryTokenPropagation)
 
 	qOpts.MaxClockSkewAdjust = v.GetDuration(queryMaxClockSkewAdjust)
@@ -133,23 +133,42 @@ func (qOpts *QueryOptions) InitFromViper(v *viper.Viper, logger *zap.Logger) (*Q
 	if err != nil {
 		logger.Error("Failed to parse headers", zap.Strings("slice", stringSlice), zap.Error(err))
 	} else {
-		qOpts.AdditionalHeaders = headers
+		qOpts.HTTP.ResponseHeaders = mapHTTPHeaderToOTELHeaders(headers)
 	}
 	qOpts.Tenancy = tenancy.InitFromViper(v)
 	qOpts.EnableTracing = v.GetBool(queryEnableTracing)
 	return qOpts, nil
 }
 
+type InitArchiveStorageFn func() (*storage.ArchiveStorage, error)
+
 // BuildQueryServiceOptions creates a QueryServiceOptions struct with appropriate adjusters and archive config
-func (qOpts *QueryOptions) BuildQueryServiceOptions(storageFactory storage.Factory, logger *zap.Logger) *querysvc.QueryServiceOptions {
-	opts := &querysvc.QueryServiceOptions{}
-	if !opts.InitArchiveStorage(storageFactory, logger) {
+func (qOpts *QueryOptions) BuildQueryServiceOptions(
+	initArchiveStorageFn InitArchiveStorageFn,
+	logger *zap.Logger,
+) (*querysvc.QueryServiceOptions, *v2querysvc.QueryServiceOptions) {
+	opts := &querysvc.QueryServiceOptions{
+		MaxClockSkewAdjust: qOpts.MaxClockSkewAdjust,
+	}
+	v2Opts := &v2querysvc.QueryServiceOptions{
+		MaxClockSkewAdjust: qOpts.MaxClockSkewAdjust,
+	}
+	as, err := initArchiveStorageFn()
+	if err != nil {
+		logger.Error("Received an error when trying to initialize archive storage", zap.Error(err))
+		return opts, v2Opts
+	}
+
+	if as != nil && as.Reader != nil && as.Writer != nil {
+		opts.ArchiveSpanReader = as.Reader
+		opts.ArchiveSpanWriter = as.Writer
+		v2Opts.ArchiveTraceReader = v1adapter.NewTraceReader(as.Reader)
+		v2Opts.ArchiveTraceWriter = v1adapter.NewTraceWriter(as.Writer)
+	} else {
 		logger.Info("Archive storage not initialized")
 	}
 
-	opts.Adjuster = adjuster.Sequence(querysvc.StandardAdjusters(qOpts.MaxClockSkewAdjust)...)
-
-	return opts
+	return opts, v2Opts
 }
 
 // stringSliceAsHeader parses a slice of strings and returns a http.Header.
@@ -166,8 +185,32 @@ func stringSliceAsHeader(slice []string) (http.Header, error) {
 
 	header, err := tp.ReadMIMEHeader()
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to parse headers")
+		return nil, errors.New("failed to parse headers")
 	}
 
 	return http.Header(header), nil
+}
+
+func mapHTTPHeaderToOTELHeaders(h http.Header) map[string]configopaque.String {
+	otelHeaders := make(map[string]configopaque.String)
+	for key, values := range h {
+		otelHeaders[key] = configopaque.String(strings.Join(values, ","))
+	}
+
+	return otelHeaders
+}
+
+func DefaultQueryOptions() QueryOptions {
+	return QueryOptions{
+		MaxClockSkewAdjust: defaultMaxClockSkewAdjust,
+		HTTP: confighttp.ServerConfig{
+			Endpoint: ports.PortToHostPort(ports.QueryHTTP),
+		},
+		GRPC: configgrpc.ServerConfig{
+			NetAddr: confignet.AddrConfig{
+				Endpoint:  ports.PortToHostPort(ports.QueryGRPC),
+				Transport: confignet.TransportTypeTCP,
+			},
+		},
+	}
 }

@@ -49,4 +49,13 @@ var (
 
 	// RouteCalcDelayStdDev is standard deviation
 	RouteCalcDelayStdDev = RouteCalcDelay / 4
+
+	// Vip controls whether roasters crash or not
+	Vip = false
+
+	// FixRedisTimeout controls whether to disable Redis timeout
+	FixRedisTimeout = false
+
+	// MaxRouteDistance is the maximum distance to calculate a route for
+	MaxRouteDistance = 9999
 )

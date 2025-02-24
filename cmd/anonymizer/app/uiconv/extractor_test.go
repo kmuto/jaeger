@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 type UITrace struct {
@@ -43,7 +43,7 @@ func TestExtractorTraceSuccess(t *testing.T) {
 
 	for i := range trace.Data {
 		for j := range trace.Data[i].Spans {
-			assert.Equal(t, "span.kind", trace.Data[i].Spans[j].Tags[0].Key)
+			assert.Equal(t, model.SpanKindKey, trace.Data[i].Spans[j].Tags[0].Key)
 		}
 	}
 }
@@ -66,7 +66,7 @@ func TestExtractorTraceOutputFileError(t *testing.T) {
 		reader,
 		zap.NewNop(),
 	)
-	require.Contains(t, err.Error(), "cannot create output file")
+	require.ErrorContains(t, err, "cannot create output file")
 }
 
 func TestExtractorTraceScanError(t *testing.T) {
@@ -86,7 +86,7 @@ func TestExtractorTraceScanError(t *testing.T) {
 	require.NoError(t, err)
 
 	err = extractor.Run()
-	require.Contains(t, err.Error(), "failed when scanning the file")
+	require.ErrorContains(t, err, "failed when scanning the file")
 }
 
 func loadJSON(t *testing.T, fileName string, i any) {

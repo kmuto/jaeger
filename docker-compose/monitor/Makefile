@@ -1,7 +1,7 @@
 # Copyright (c) 2024 The Jaeger Authors.
 # SPDX-License-Identifier: Apache-2.0
 
-BINARY ?= all-in-one # Default value uses v1 binary
+BINARY ?= jaeger # Default value uses v2 binary
 
 .PHONY: build
 build: clean-jaeger
@@ -18,15 +18,15 @@ build: clean-jaeger
 # starts up the system required for SPM using the latest otel image and a development jaeger image.
 # Note: the jaeger "dev" image can be built with "make build".
 .PHONY: dev
-dev: export JAEGER_IMAGE_TAG = dev
+dev: export JAEGER_VERSION = dev
 dev: 
-	docker compose -f docker-compose.yml up $(DOCKER_COMPOSE_ARGS)
+	docker compose up $(DOCKER_COMPOSE_ARGS)
 
-.PHONY: dev-v2
-dev-v2: export JAEGER_IMAGE_TAG = dev
-dev-v2: export BINARY = jaeger
-dev-v2: build 
-	docker compose -f docker-compose-v2.yml up $(DOCKER_COMPOSE_ARGS)
+.PHONY: dev-v1
+dev-v1: export JAEGER_VERSION = dev
+dev-v1: export BINARY = all-in-one
+dev-v1: build
+	docker compose -f docker-compose-v1.yml up $(DOCKER_COMPOSE_ARGS)
 
 .PHONY: clean-jaeger
 clean-jaeger:
@@ -39,4 +39,3 @@ clean-all: clean-jaeger
 	docker rmi -f jaegertracing/all-in-one:latest ; \
 	docker rmi -f otel/opentelemetry-collector-contrib:latest ; \
 	docker rmi -f prom/prometheus:latest ; \
-	docker rmi -f grafana/grafana:latest

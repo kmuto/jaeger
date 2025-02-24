@@ -4,7 +4,7 @@
 package adjuster
 
 import (
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/pkg/otelsemconv"
 )
 
@@ -32,11 +32,10 @@ func OTelTagAdjuster() Adjuster {
 		span.Tags = span.Tags[:newI]
 	}
 
-	return Func(func(trace *model.Trace) (*model.Trace, error) {
+	return Func(func(trace *model.Trace) {
 		for _, span := range trace.Spans {
 			adjustSpanTags(span)
 			model.KeyValues(span.Process.Tags).Sort()
 		}
-		return trace, nil
 	})
 }

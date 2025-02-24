@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
 	"github.com/jaegertracing/jaeger/pkg/testutils"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
 )
 
 func TestSamplingManager_GetSamplingStrategy(t *testing.T) {
@@ -38,15 +38,7 @@ func TestSamplingManager_GetSamplingStrategy_error(t *testing.T) {
 	manager := NewConfigManager(conn)
 	resp, err := manager.GetSamplingStrategy(context.Background(), "any")
 	require.Nil(t, resp)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get sampling strategy")
-}
-
-func TestSamplingManager_GetBaggageRestrictions(t *testing.T) {
-	manager := NewConfigManager(nil)
-	rest, err := manager.GetBaggageRestrictions(context.Background(), "foo")
-	require.Nil(t, rest)
-	require.EqualError(t, err, "baggage not implemented")
+	assert.ErrorContains(t, err, "failed to get sampling strategy")
 }
 
 type mockSamplingHandler struct{}
@@ -62,7 +54,7 @@ func initializeGRPCTestServer(t *testing.T, beforeServe func(server *grpc.Server
 	beforeServe(server)
 	go func() {
 		err := server.Serve(lis)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}()
 	return server, lis.Addr()
 }

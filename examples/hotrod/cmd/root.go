@@ -72,7 +72,18 @@ func onInitialize() {
 		logger.Info("fix: overriding route worker pool size", zap.Int("old", config.RouteWorkerPoolSize), zap.Int("new", fixRouteWorkerPoolSize))
 		config.RouteWorkerPoolSize = fixRouteWorkerPoolSize
 	}
-
+	if vip {
+		logger.Info("fix: overriding crash roasters")
+		config.Vip = true
+	}
+	if fixRedisTimeout {
+		logger.Info("fix: disabling redis timeout")
+		config.FixRedisTimeout = true
+	}
+	if config.MaxRouteDistance != maxRouteDistance {
+		logger.Info("overriding max route distance", zap.Int("old", config.MaxRouteDistance), zap.Int("new", maxRouteDistance))
+		config.MaxRouteDistance = maxRouteDistance
+	}
 	if customerPort != 8081 {
 		logger.Info("changing customer service port", zap.Int("old", 8081), zap.Int("new", customerPort))
 	}

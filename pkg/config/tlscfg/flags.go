@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/collector/config/configtls"
 )
 
 const (
@@ -34,8 +35,7 @@ type ClientFlagsConfig struct {
 
 // ServerFlagsConfig describes which CLI flags for TLS server should be generated.
 type ServerFlagsConfig struct {
-	Prefix                   string
-	EnableCertReloadInterval bool
+	Prefix string
 }
 
 // AddFlags adds flags for TLS to the FlagSet.
@@ -57,14 +57,12 @@ func (c ServerFlagsConfig) AddFlags(flags *flag.FlagSet) {
 	flags.String(c.Prefix+tlsCipherSuites, "", "Comma-separated list of cipher suites for the server, values are from tls package constants (https://golang.org/pkg/crypto/tls/#pkg-constants).")
 	flags.String(c.Prefix+tlsMinVersion, "", "Minimum TLS version supported (Possible values: 1.0, 1.1, 1.2, 1.3)")
 	flags.String(c.Prefix+tlsMaxVersion, "", "Maximum TLS version supported (Possible values: 1.0, 1.1, 1.2, 1.3)")
-	if c.EnableCertReloadInterval {
-		flags.Duration(c.Prefix+tlsReloadInterval, 0, "The duration after which the certificate will be reloaded (0s means will not be reloaded)")
-	}
+	flags.Duration(c.Prefix+tlsReloadInterval, 0, "The duration after which the certificate will be reloaded (0s means will not be reloaded)")
 }
 
 // InitFromViper creates tls.Config populated with values retrieved from Viper.
-func (c ClientFlagsConfig) InitFromViper(v *viper.Viper) (Options, error) {
-	var p Options
+func (c ClientFlagsConfig) InitFromViper(v *viper.Viper) (configtls.ClientConfig, error) {
+	var p options
 	p.Enabled = v.GetBool(c.Prefix + tlsEnabled)
 	p.CAPath = v.GetString(c.Prefix + tlsCA)
 	p.CertPath = v.GetString(c.Prefix + tlsCert)
@@ -73,18 +71,18 @@ func (c ClientFlagsConfig) InitFromViper(v *viper.Viper) (Options, error) {
 	p.SkipHostVerify = v.GetBool(c.Prefix + tlsSkipHostVerify)
 
 	if !p.Enabled {
-		var empty Options
+		var empty options
 		if !reflect.DeepEqual(&p, &empty) {
-			return p, fmt.Errorf("%s.tls.* options cannot be used when %s is false", c.Prefix, c.Prefix+tlsEnabled)
+			return configtls.ClientConfig{}, fmt.Errorf("%s.tls.* options cannot be used when %s is false", c.Prefix, c.Prefix+tlsEnabled)
 		}
 	}
 
-	return p, nil
+	return p.ToOtelClientConfig(), nil
 }
 
 // InitFromViper creates tls.Config populated with values retrieved from Viper.
-func (c ServerFlagsConfig) InitFromViper(v *viper.Viper) (Options, error) {
-	var p Options
+func (c ServerFlagsConfig) InitFromViper(v *viper.Viper) (*configtls.ServerConfig, error) {
+	var p options
 	p.Enabled = v.GetBool(c.Prefix + tlsEnabled)
 	p.CertPath = v.GetString(c.Prefix + tlsCert)
 	p.KeyPath = v.GetString(c.Prefix + tlsKey)
@@ -97,13 +95,13 @@ func (c ServerFlagsConfig) InitFromViper(v *viper.Viper) (Options, error) {
 	p.ReloadInterval = v.GetDuration(c.Prefix + tlsReloadInterval)
 
 	if !p.Enabled {
-		var empty Options
+		var empty options
 		if !reflect.DeepEqual(&p, &empty) {
-			return p, fmt.Errorf("%s.tls.* options cannot be used when %s is false", c.Prefix, c.Prefix+tlsEnabled)
+			return nil, fmt.Errorf("%s.tls.* options cannot be used when %s is false", c.Prefix, c.Prefix+tlsEnabled)
 		}
 	}
 
-	return p, nil
+	return p.ToOtelServerConfig(), nil
 }
 
 // stripWhiteSpace removes all whitespace characters from a string

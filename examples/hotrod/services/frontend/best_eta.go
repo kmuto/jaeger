@@ -60,13 +60,13 @@ func newBestETA(tracer trace.TracerProvider, logger log.Factory, options ConfigO
 }
 
 func (eta *bestETA) Get(ctx context.Context, customerID int) (*Response, error) {
-	customer, err := eta.customer.Get(ctx, customerID)
+	cust, err := eta.customer.Get(ctx, customerID)
 	if err != nil {
 		return nil, err
 	}
-	eta.logger.For(ctx).Info("Found customer", zap.Any("customer", customer))
+	eta.logger.For(ctx).Info("Found customer", zap.Any("customer", cust))
 
-	m, err := baggage.NewMember("customer", customer.Name)
+	m, err := baggage.NewMember("customer", cust.Name)
 	if err != nil {
 		eta.logger.For(ctx).Error("cannot create baggage member", zap.Error(err))
 	}
@@ -77,19 +77,19 @@ func (eta *bestETA) Get(ctx context.Context, customerID int) (*Response, error) 
 	}
 	ctx = baggage.ContextWithBaggage(ctx, bag)
 
-	drivers, err := eta.driver.FindNearest(ctx, customer.Location)
+	drivers, err := eta.driver.FindNearest(ctx, cust.Location)
 	if err != nil {
 		return nil, err
 	}
 	eta.logger.For(ctx).Info("Found drivers", zap.Any("drivers", drivers))
 
-	results := eta.getRoutes(ctx, customer, drivers)
+	results := eta.getRoutes(ctx, cust, drivers)
 	eta.logger.For(ctx).Info("Found routes", zap.Any("routes", results))
 
 	resp := &Response{ETA: math.MaxInt64}
 	for _, result := range results {
 		if result.err != nil {
-			return nil, err
+			return nil, result.err
 		}
 		if result.route.ETA < resp.ETA {
 			resp.ETA = result.route.ETA
@@ -111,19 +111,28 @@ type routeResult struct {
 }
 
 // getRoutes calls Route service for each (customer, driver) pair
-func (eta *bestETA) getRoutes(ctx context.Context, customer *customer.Customer, drivers []driver.Driver) []routeResult {
+func (eta *bestETA) getRoutes(ctx context.Context, cust *customer.Customer, drivers []driver.Driver) []routeResult {
 	results := make([]routeResult, 0, len(drivers))
 	wg := sync.WaitGroup{}
 	routesLock := sync.Mutex{}
+
 	for _, dd := range drivers {
 		wg.Add(1)
-		driver := dd // capture loop var
+		drv := dd // capture loop var
 		// Use worker pool to (potentially) execute requests in parallel
 		eta.pool.Execute(func() {
-			route, err := eta.route.FindRoute(ctx, driver.Location, customer.Location)
+			vip := config.Vip && cust.ID == "567" // cust.Name == "Amazing_Coffee_Roasters"
+			var route *route.Route
+			var err error
+			route, err = eta.route.FindRoute(ctx, drv.Location, cust.Location, vip)
+			if err != nil {
+				eta.logger.For(ctx).Error("Failed to find route", zap.Error(err))
+				wg.Done()
+				return
+			}
 			routesLock.Lock()
 			results = append(results, routeResult{
-				driver: driver.DriverID,
+				driver: drv.DriverID,
 				route:  route,
 				err:    err,
 			})

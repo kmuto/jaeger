@@ -5,15 +5,17 @@
 package handler
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/zipkincore"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
 	zipkinS "github.com/jaegertracing/jaeger/cmd/collector/app/sanitizer/zipkin"
-	"github.com/jaegertracing/jaeger/model"
 	jConv "github.com/jaegertracing/jaeger/model/converter/thrift/jaeger"
 	"github.com/jaegertracing/jaeger/model/converter/thrift/zipkin"
-	"github.com/jaegertracing/jaeger/thrift-gen/jaeger"
-	"github.com/jaegertracing/jaeger/thrift-gen/zipkincore"
 )
 
 // SubmitBatchOptions are passed to Submit methods of the handlers.
@@ -24,13 +26,13 @@ type SubmitBatchOptions struct {
 // ZipkinSpansHandler consumes and handles zipkin spans
 type ZipkinSpansHandler interface {
 	// SubmitZipkinBatch records a batch of spans in Zipkin Thrift format
-	SubmitZipkinBatch(spans []*zipkincore.Span, options SubmitBatchOptions) ([]*zipkincore.Response, error)
+	SubmitZipkinBatch(ctx context.Context, spans []*zipkincore.Span, options SubmitBatchOptions) ([]*zipkincore.Response, error)
 }
 
 // JaegerBatchesHandler consumes and handles Jaeger batches
 type JaegerBatchesHandler interface {
 	// SubmitBatches records a batch of spans in Jaeger Thrift format
-	SubmitBatches(batches []*jaeger.Batch, options SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error)
+	SubmitBatches(ctx context.Context, batches []*jaeger.Batch, options SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error)
 }
 
 type jaegerBatchesHandler struct {
@@ -46,7 +48,7 @@ func NewJaegerSpanHandler(logger *zap.Logger, modelProcessor processor.SpanProce
 	}
 }
 
-func (jbh *jaegerBatchesHandler) SubmitBatches(batches []*jaeger.Batch, options SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error) {
+func (jbh *jaegerBatchesHandler) SubmitBatches(ctx context.Context, batches []*jaeger.Batch, options SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error) {
 	responses := make([]*jaeger.BatchSubmitResponse, 0, len(batches))
 	for _, batch := range batches {
 		mSpans := make([]*model.Span, 0, len(batch.Spans))
@@ -54,9 +56,12 @@ func (jbh *jaegerBatchesHandler) SubmitBatches(batches []*jaeger.Batch, options 
 			mSpan := jConv.ToDomainSpan(span, batch.Process)
 			mSpans = append(mSpans, mSpan)
 		}
-		oks, err := jbh.modelProcessor.ProcessSpans(mSpans, processor.SpansOptions{
-			InboundTransport: options.InboundTransport,
-			SpanFormat:       processor.JaegerSpanFormat,
+		oks, err := jbh.modelProcessor.ProcessSpans(ctx, processor.SpansV1{
+			Spans: mSpans,
+			Details: processor.Details{
+				InboundTransport: options.InboundTransport,
+				SpanFormat:       processor.JaegerSpanFormat,
+			},
 		})
 		if err != nil {
 			jbh.logger.Error("Collector failed to process span batch", zap.Error(err))
@@ -95,7 +100,7 @@ func NewZipkinSpanHandler(logger *zap.Logger, modelHandler processor.SpanProcess
 }
 
 // SubmitZipkinBatch records a batch of spans already in Zipkin Thrift format.
-func (h *zipkinSpanHandler) SubmitZipkinBatch(spans []*zipkincore.Span, options SubmitBatchOptions) ([]*zipkincore.Response, error) {
+func (h *zipkinSpanHandler) SubmitZipkinBatch(ctx context.Context, spans []*zipkincore.Span, options SubmitBatchOptions) ([]*zipkincore.Response, error) {
 	mSpans := make([]*model.Span, 0, len(spans))
 	convCount := make([]int, len(spans))
 	for i, span := range spans {
@@ -105,9 +110,12 @@ func (h *zipkinSpanHandler) SubmitZipkinBatch(spans []*zipkincore.Span, options 
 		convCount[i] = len(converted)
 		mSpans = append(mSpans, converted...)
 	}
-	bools, err := h.modelProcessor.ProcessSpans(mSpans, processor.SpansOptions{
-		InboundTransport: options.InboundTransport,
-		SpanFormat:       processor.ZipkinSpanFormat,
+	bools, err := h.modelProcessor.ProcessSpans(ctx, processor.SpansV1{
+		Spans: mSpans,
+		Details: processor.Details{
+			InboundTransport: options.InboundTransport,
+			SpanFormat:       processor.ZipkinSpanFormat,
+		},
 	})
 	if err != nil {
 		h.logger.Error("Collector failed to process Zipkin span batch", zap.Error(err))

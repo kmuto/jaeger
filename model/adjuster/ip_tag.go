@@ -9,7 +9,7 @@ import (
 	"encoding/binary"
 	"strconv"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 var ipTagsToCorrect = map[string]struct{}{
@@ -49,12 +49,11 @@ func IPTagAdjuster() Adjuster {
 		}
 	}
 
-	return Func(func(trace *model.Trace) (*model.Trace, error) {
+	return Func(func(trace *model.Trace) {
 		for _, span := range trace.Spans {
 			adjustTags(span.Tags)
 			adjustTags(span.Process.Tags)
 			model.KeyValues(span.Process.Tags).Sort()
 		}
-		return trace, nil
 	})
 }

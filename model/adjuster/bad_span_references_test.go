@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 func TestSpanReferencesAdjuster(t *testing.T) {
@@ -29,8 +28,7 @@ func TestSpanReferencesAdjuster(t *testing.T) {
 			},
 		},
 	}
-	trace, err := SpanReferences().Adjust(trace)
-	require.NoError(t, err)
+	SpanReferences().Adjust(trace)
 	assert.Empty(t, trace.Spans[0].References)
 	assert.Empty(t, trace.Spans[1].References)
 	assert.Len(t, trace.Spans[2].References, 2)

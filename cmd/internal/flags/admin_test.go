@@ -4,6 +4,7 @@
 package flags
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -15,12 +16,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/config/configtls"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/jaegertracing/jaeger/pkg/config"
-	"github.com/jaegertracing/jaeger/pkg/config/tlscfg"
 	"github.com/jaegertracing/jaeger/pkg/healthcheck"
 	"github.com/jaegertracing/jaeger/ports"
 )
@@ -69,7 +70,7 @@ func TestAdminFailToServe(t *testing.T) {
 	require.NoError(t, adminServer.initFromViper(v, logger))
 
 	adminServer.serveWithListener(l)
-	defer adminServer.Close()
+	t.Cleanup(func() { assert.NoError(t, adminServer.Close()) })
 
 	waitForEqual(t, healthcheck.Broken, func() any { return adminServer.HC().Get() })
 
@@ -95,15 +96,14 @@ func TestAdminWithFailedFlags(t *testing.T) {
 	})
 	require.NoError(t, err)
 	err = adminServer.initFromViper(v, logger)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse admin server TLS options")
+	assert.ErrorContains(t, err, "failed to parse admin server TLS options")
 }
 
 func TestAdminServerTLS(t *testing.T) {
 	testCases := []struct {
 		name           string
 		serverTLSFlags []string
-		clientTLS      tlscfg.Options
+		clientTLS      configtls.ClientConfig
 	}{
 		{
 			name: "should pass with TLS client to trusted TLS server with correct hostname",
@@ -112,9 +112,11 @@ func TestAdminServerTLS(t *testing.T) {
 				"--admin.http.tls.cert=" + testCertKeyLocation + "/example-server-cert.pem",
 				"--admin.http.tls.key=" + testCertKeyLocation + "/example-server-key.pem",
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure: false,
+				Config: configtls.Config{
+					CAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				},
 				ServerName: "example.com",
 			},
 		},
@@ -134,9 +136,8 @@ func TestAdminServerTLS(t *testing.T) {
 			adminServer.Serve()
 			defer adminServer.Close()
 
-			clientTLSCfg, err0 := test.clientTLS.Config(zap.NewNop())
+			clientTLSCfg, err0 := test.clientTLS.LoadTLSConfig(context.Background())
 			require.NoError(t, err0)
-			defer test.clientTLS.Close()
 			dialer := &net.Dialer{Timeout: 2 * time.Second}
 			conn, clientError := tls.DialWithDialer(dialer, "tcp", fmt.Sprintf("localhost:%d", ports.CollectorAdminHTTP), clientTLSCfg)
 			require.NoError(t, clientError)

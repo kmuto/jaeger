@@ -10,8 +10,6 @@ import (
 	"strconv"
 
 	"github.com/spf13/viper"
-
-	"github.com/jaegertracing/jaeger/ports"
 )
 
 const (
@@ -30,9 +28,9 @@ var defaultProcessors = []struct {
 	protocol Protocol
 	port     int
 }{
-	{model: "zipkin", protocol: "compact", port: ports.AgentZipkinThriftCompactUDP},
-	{model: "jaeger", protocol: "compact", port: ports.AgentJaegerThriftCompactUDP},
-	{model: "jaeger", protocol: "binary", port: ports.AgentJaegerThriftBinaryUDP},
+	{model: "zipkin", protocol: "compact", port: AgentZipkinThriftCompactUDP},
+	{model: "jaeger", protocol: "compact", port: AgentJaegerThriftCompactUDP},
+	{model: "jaeger", protocol: "binary", port: AgentJaegerThriftBinaryUDP},
 }
 
 // AddFlags adds flags for Builder.
@@ -40,7 +38,7 @@ func AddFlags(flags *flag.FlagSet) {
 	flags.String(
 		httpServerHostPort,
 		defaultHTTPServerHostPort,
-		"host:port of the http server (e.g. for /sampling point and /baggageRestrictions endpoint)")
+		"host:port of the http server (e.g. for /sampling endpoint)")
 
 	for _, p := range defaultProcessors {
 		prefix := fmt.Sprintf(processorPrefixFmt, p.model, p.protocol)

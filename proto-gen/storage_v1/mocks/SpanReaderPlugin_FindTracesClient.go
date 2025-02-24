@@ -21,7 +21,7 @@ type SpanReaderPlugin_FindTracesClient struct {
 	mock.Mock
 }
 
-// CloseSend provides a mock function with given fields:
+// CloseSend provides a mock function with no fields
 func (_m *SpanReaderPlugin_FindTracesClient) CloseSend() error {
 	ret := _m.Called()
 
@@ -39,7 +39,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) CloseSend() error {
 	return r0
 }
 
-// Context provides a mock function with given fields:
+// Context provides a mock function with no fields
 func (_m *SpanReaderPlugin_FindTracesClient) Context() context.Context {
 	ret := _m.Called()
 
@@ -59,7 +59,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) Context() context.Context {
 	return r0
 }
 
-// Header provides a mock function with given fields:
+// Header provides a mock function with no fields
 func (_m *SpanReaderPlugin_FindTracesClient) Header() (metadata.MD, error) {
 	ret := _m.Called()
 
@@ -89,7 +89,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) Header() (metadata.MD, error) {
 	return r0, r1
 }
 
-// Recv provides a mock function with given fields:
+// Recv provides a mock function with no fields
 func (_m *SpanReaderPlugin_FindTracesClient) Recv() (*storage_v1.SpansResponseChunk, error) {
 	ret := _m.Called()
 
@@ -120,7 +120,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) Recv() (*storage_v1.SpansResponseCh
 }
 
 // RecvMsg provides a mock function with given fields: m
-func (_m *SpanReaderPlugin_FindTracesClient) RecvMsg(m interface{}) error {
+func (_m *SpanReaderPlugin_FindTracesClient) RecvMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -128,7 +128,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) RecvMsg(m interface{}) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -138,7 +138,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) RecvMsg(m interface{}) error {
 }
 
 // SendMsg provides a mock function with given fields: m
-func (_m *SpanReaderPlugin_FindTracesClient) SendMsg(m interface{}) error {
+func (_m *SpanReaderPlugin_FindTracesClient) SendMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -146,7 +146,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) SendMsg(m interface{}) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -155,7 +155,7 @@ func (_m *SpanReaderPlugin_FindTracesClient) SendMsg(m interface{}) error {
 	return r0
 }
 
-// Trailer provides a mock function with given fields:
+// Trailer provides a mock function with no fields
 func (_m *SpanReaderPlugin_FindTracesClient) Trailer() metadata.MD {
 	ret := _m.Called()
 
