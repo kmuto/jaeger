@@ -1,5 +1,8 @@
 # docker login
 # docker buildx build --platform linux/amd64,linux/arm64 -t kenshimuto/hotrod:latest  --push .
+# (Create PAT on GitHub)
+# docker login ghcr.io -u kmuto
+# docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/kmuto/hotrod:latest  --push .
 FROM --platform=$BUILDPLATFORM golang:bookworm AS builder
 ARG TARGETOS
 ARG TARGETARCH

@@ -1,96 +1,68 @@
-# To run a specific version of Jaeger, use environment variable, e.g.:
-#     JAEGER_VERSION=1.52 docker compose up
-
+# 最終デモ用
+# Mackerelのトレースにのみ送出します。イメージはghcr.ioに配置しています
 services:
-  jaeger:
-    image: ${REGISTRY:-}jaegertracing/all-in-one:${JAEGER_VERSION:-latest}
-    ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
-    environment:
-      - LOG_LEVEL=debug
-    networks:
-      - jaeger-example
-
   hotrod1:
-    #image: ${REGISTRY:-}jaegertracing/example-hotrod:${JAEGER_VERSION:-latest}
-    image: kmuto:hotrod
-    # To run the latest trunk build, find the tag at Docker Hub and use the line below
-    # https://hub.docker.com/r/jaegertracing/example-hotrod-snapshot/tags
-    #image: jaegertracing/example-hotrod-snapshot:0ab8f2fcb12ff0d10830c1ee3bb52b745522db6c
+    image: ghcr.io/kmuto/hotrod:latest
     ports:
       - "8080:8080"
-      #- "8083:8083"
     command: ["all", "-S", "-m", "<p>注目するのはリクエストから配車に至るlatencyの値です。同じボタンを連打したときにlatencyが伸びていくのを確認し、トレースを見てみましょう。</p>"]
     environment:
-      #- OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       #- OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-vaxila.mackerelio.com
-      #- OTEL_EXPORTER_OTLP_HEADERS=Mackerel-Api-Key=${MACKEREL_VAXILA_APIKEY}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+      #- OTEL_EXPORTER_OTLP_HEADERS=Mackerel-Api-Key=${MACKEREL_APIKEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     networks:
-      - jaeger-example
-    depends_on:
-      - jaeger
+      - hotrod-example
 
   hotrod2:
-    image: kmuto:hotrod
+    image: ghcr.io/kmuto/hotrod:latest
     ports:
       - "8081:8080"
     command: ["all", "-S", "-M", "-m", "<p>DBへのアクセスを改善したので連打してもlatency値は変わらなくなっています。さらにlatencyを下げるために何ができるでしょうか。トレースを見てみましょう。</p>"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     networks:
-      - jaeger-example
-    depends_on:
-      - jaeger
+      - hotrod-example
 
   hotrod3:
-    image: kmuto:hotrod
+    image: ghcr.io/kmuto/hotrod:latest
     ports:
       - "8082:8080"
     command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-m", "<p>ルート検索の並列性を上げ、待ち時間を短縮しました。トレースを見てみましょう。</p>"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     networks:
-      - jaeger-example
-    depends_on:
-      - jaeger
+      - hotrod-example
 
   hotrod4:
-    image: kmuto:hotrod
+    image: ghcr.io/kmuto/hotrod:latest
     ports:
       - "8083:8080"
     command: ["all", "-S", "-M", "-D", "100ms", "-W", "100", "-L", "15", "-m", "<p>最後に、特定処理で障害を発生させてみます。何度かクリックしていると、詰まるような動作が発生します。ときには結果が返ってこないこともあります。トレースツール側で調べてみましょう。</p>"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     networks:
-      - jaeger-example
-    depends_on:
-      - jaeger
+      - hotrod-example
 
   hotrod5:
-    image: kmuto:hotrod
+    image: ghcr.io/kmuto/hotrod:latest
     ports:
       - "8084:8080"
     command: ["all", "-m", "<p>デモの前に実行する用。Redis timeoutを持つトレースを記録します。</p>"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4319
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     networks:
-      - jaeger-example
-    depends_on:
-      - jaeger
+      - hotrod-example
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:latest
     volumes:
-      - ./otel-col.yml:/etc/otelcol-contrib/config.yaml
+      - ./otel-col-demo.yml:/etc/otelcol-contrib/config.yaml
     ports:
-      - "4319:4319"
+      - "4318:4318"
     environment:
-      - MACKEREL_VAXILA_APIKEY
+      - MACKEREL_APIKEY
     networks:
-      - jaeger-example
+      - hotrod-example
 
 networks:
-  jaeger-example:
+  hotrod-example:
