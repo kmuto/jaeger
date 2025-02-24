@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -150,8 +151,7 @@ func TestClientGetIndices(t *testing.T) {
 
 			indices, err := c.GetJaegerIndices(test.prefix)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				require.ErrorContains(t, err, test.errContains)
 				assert.Nil(t, indices)
 			} else {
 				require.NoError(t, err)
@@ -176,6 +176,7 @@ func getIndicesList(size int) []Index {
 func TestClientDeleteIndices(t *testing.T) {
 	masterTimeoutSeconds := 1
 	maxURLPathLength := 4000
+	ignoreUnavailableIndex := true
 
 	tests := []struct {
 		name         string
@@ -237,6 +238,7 @@ func TestClientDeleteIndices(t *testing.T) {
 				assert.Equal(t, http.MethodDelete, req.Method)
 				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
 				assert.Equal(t, fmt.Sprintf("%ds", masterTimeoutSeconds), req.URL.Query().Get("master_timeout"))
+				assert.Equal(t, strconv.FormatBool(ignoreUnavailableIndex), req.URL.Query().Get("ignore_unavailable"))
 				assert.LessOrEqual(t, len(req.URL.Path), maxURLPathLength)
 
 				// removes leading '/' and trailing ','
@@ -262,18 +264,101 @@ func TestClientDeleteIndices(t *testing.T) {
 					Endpoint:  testServer.URL,
 					BasicAuth: "foobar",
 				},
-				MasterTimeoutSeconds: masterTimeoutSeconds,
+				MasterTimeoutSeconds:   masterTimeoutSeconds,
+				IgnoreUnavailableIndex: ignoreUnavailableIndex,
 			}
 
 			err := c.DeleteIndices(test.indices)
 			assert.Equal(t, test.triggerAPI, apiTriggered)
 
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			} else {
 				assert.Len(t, test.indices, deletedIndicesCount)
 			}
+		})
+	}
+}
+
+func TestIndexExists(t *testing.T) {
+	t.Run("index exists", func(t *testing.T) {
+		testIndexOrAliasExistence(t, "index")
+	})
+}
+
+func TestAliasExists(t *testing.T) {
+	t.Run("alias exists", func(t *testing.T) {
+		testIndexOrAliasExistence(t, "alias")
+	})
+}
+
+func testIndexOrAliasExistence(t *testing.T, existence string) {
+	maxURLPathLength := 4000
+	type indexOrAliasExistence struct {
+		name         string
+		exists       bool
+		responseCode int
+		expectedErr  string
+	}
+	tests := []indexOrAliasExistence{
+		{
+			name:         "exists",
+			responseCode: http.StatusOK,
+			exists:       true,
+		},
+		{
+			name:         "not exists",
+			responseCode: http.StatusNotFound,
+			exists:       false,
+		},
+	}
+	if existence == "index" {
+		test := indexOrAliasExistence{
+			name:         "generic error",
+			responseCode: http.StatusBadRequest,
+			expectedErr:  "failed to check if index exists: request failed, status code: 400",
+		}
+		tests = append(tests, test)
+	} else if existence == "alias" {
+		test := indexOrAliasExistence{
+			name:         "generic error",
+			responseCode: http.StatusBadRequest,
+			expectedErr:  "failed to check if alias exists: request failed, status code: 400",
+		}
+		tests = append(tests, test)
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			apiTriggered := false
+			testServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+				apiTriggered = true
+				assert.Equal(t, http.MethodHead, req.Method)
+				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
+				assert.LessOrEqual(t, len(req.URL.Path), maxURLPathLength)
+				res.WriteHeader(test.responseCode)
+			}))
+			defer testServer.Close()
+			c := &IndicesClient{
+				Client: Client{
+					Client:    testServer.Client(),
+					Endpoint:  testServer.URL,
+					BasicAuth: "foobar",
+				},
+			}
+			var exists bool
+			var err error
+			if existence == "index" {
+				exists, err = c.IndexExists("jaeger-span")
+			} else if existence == "alias" {
+				exists, err = c.AliasExists("jaeger-span")
+			}
+			if test.expectedErr != "" {
+				require.ErrorContains(t, err, test.expectedErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.True(t, apiTriggered)
+			assert.Equal(t, test.exists, exists)
 		})
 	}
 }
@@ -341,8 +426,7 @@ func TestClientCreateIndex(t *testing.T) {
 			}
 			err := c.CreateIndex(indexName)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			}
 		})
 	}
@@ -385,10 +469,11 @@ func TestClientCreateAliases(t *testing.T) {
 				assert.Equal(t, http.MethodPost, req.Method)
 				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
 				body, err := io.ReadAll(req.Body)
-				require.NoError(t, err)
-				assert.Equal(t, expectedRequestBody, string(body))
-				res.WriteHeader(test.responseCode)
-				res.Write([]byte(test.response))
+				if assert.NoError(t, err) {
+					assert.Equal(t, expectedRequestBody, string(body))
+					res.WriteHeader(test.responseCode)
+					res.Write([]byte(test.response))
+				}
 			}))
 			defer testServer.Close()
 
@@ -401,8 +486,7 @@ func TestClientCreateAliases(t *testing.T) {
 			}
 			err := c.CreateAlias(aliases)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			}
 		})
 	}
@@ -445,7 +529,7 @@ func TestClientDeleteAliases(t *testing.T) {
 				assert.Equal(t, http.MethodPost, req.Method)
 				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
 				body, err := io.ReadAll(req.Body)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, expectedRequestBody, string(body))
 				res.WriteHeader(test.responseCode)
 				res.Write([]byte(test.response))
@@ -461,8 +545,7 @@ func TestClientDeleteAliases(t *testing.T) {
 			}
 			err := c.DeleteAlias(aliases)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			}
 		})
 	}
@@ -508,7 +591,7 @@ func TestClientCreateTemplate(t *testing.T) {
 				assert.Equal(t, http.MethodPut, req.Method)
 				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
 				body, err := io.ReadAll(req.Body)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, templateContent, string(body))
 
 				res.WriteHeader(test.responseCode)
@@ -525,8 +608,7 @@ func TestClientCreateTemplate(t *testing.T) {
 			}
 			err := c.CreateTemplate(templateContent, templateName)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			}
 		})
 	}
@@ -562,7 +644,7 @@ func TestRollover(t *testing.T) {
 				assert.Equal(t, http.MethodPost, req.Method)
 				assert.Equal(t, "Basic foobar", req.Header.Get("Authorization"))
 				body, err := io.ReadAll(req.Body)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, expectedRequestBody, string(body))
 
 				res.WriteHeader(test.responseCode)
@@ -579,8 +661,7 @@ func TestRollover(t *testing.T) {
 			}
 			err := c.Rollover("jaeger-span", mapConditions)
 			if test.errContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errContains)
+				assert.ErrorContains(t, err, test.errContains)
 			}
 		})
 	}

@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/pkg/testutils"
 )
 
@@ -97,9 +97,7 @@ func BenchmarkCodecUnmarshal25Spans(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var trace model.Trace
 		err := c.Unmarshal(bytes, &trace)
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
 	}
 }
 

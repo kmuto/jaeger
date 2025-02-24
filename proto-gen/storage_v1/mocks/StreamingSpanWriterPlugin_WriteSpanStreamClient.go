@@ -21,7 +21,7 @@ type StreamingSpanWriterPlugin_WriteSpanStreamClient struct {
 	mock.Mock
 }
 
-// CloseAndRecv provides a mock function with given fields:
+// CloseAndRecv provides a mock function with no fields
 func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) CloseAndRecv() (*storage_v1.WriteSpanResponse, error) {
 	ret := _m.Called()
 
@@ -51,7 +51,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) CloseAndRecv() (*stor
 	return r0, r1
 }
 
-// CloseSend provides a mock function with given fields:
+// CloseSend provides a mock function with no fields
 func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) CloseSend() error {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) CloseSend() error {
 	return r0
 }
 
-// Context provides a mock function with given fields:
+// Context provides a mock function with no fields
 func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Context() context.Context {
 	ret := _m.Called()
 
@@ -89,7 +89,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Context() context.Con
 	return r0
 }
 
-// Header provides a mock function with given fields:
+// Header provides a mock function with no fields
 func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Header() (metadata.MD, error) {
 	ret := _m.Called()
 
@@ -120,7 +120,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Header() (metadata.MD
 }
 
 // RecvMsg provides a mock function with given fields: m
-func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) RecvMsg(m interface{}) error {
+func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) RecvMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -128,7 +128,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) RecvMsg(m interface{}
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -156,7 +156,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Send(_a0 *storage_v1.
 }
 
 // SendMsg provides a mock function with given fields: m
-func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) SendMsg(m interface{}) error {
+func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) SendMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -164,7 +164,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) SendMsg(m interface{}
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -173,7 +173,7 @@ func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) SendMsg(m interface{}
 	return r0
 }
 
-// Trailer provides a mock function with given fields:
+// Trailer provides a mock function with no fields
 func (_m *StreamingSpanWriterPlugin_WriteSpanStreamClient) Trailer() metadata.MD {
 	ret := _m.Called()
 

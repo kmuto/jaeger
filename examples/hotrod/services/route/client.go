@@ -41,9 +41,9 @@ func (c *Client) FindRoute(ctx context.Context, pickup, dropoff string, vip bool
 	if vip {
 		v.Set("vip", "yes")
 	}
-	url := "http://" + c.hostPort + "/route?" + v.Encode()
+	routeURL := "http://" + c.hostPort + "/route?" + v.Encode()
 	var route Route
-	if err := c.client.GetJSON(ctx, "/route", url, &route); err != nil {
+	if err := c.client.GetJSON(ctx, "/route", routeURL, &route); err != nil {
 		c.logger.For(ctx).Error("Error getting route", zap.Error(err))
 		return nil, err
 	}

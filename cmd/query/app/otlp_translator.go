@@ -6,10 +6,10 @@ package app
 import (
 	"fmt"
 
-	model2otel "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 )
 
 func otlp2traces(otlpSpans []byte) ([]*model.Trace, error) {
@@ -18,9 +18,7 @@ func otlp2traces(otlpSpans []byte) ([]*model.Trace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot unmarshal OTLP : %w", err)
 	}
-	jaegerBatches, _ := model2otel.ProtoFromTraces(otlpTraces)
-	// ProtoFromTraces will not give an error
-
+	jaegerBatches := v1adapter.ProtoFromTraces(otlpTraces)
 	var traces []*model.Trace
 	traceMap := make(map[model.TraceID]*model.Trace)
 	for _, batch := range jaegerBatches {

@@ -4,21 +4,24 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/configtls"
 	"go.uber.org/zap"
 
 	"github.com/jaegertracing/jaeger/cmd/collector/app/handler"
 	"github.com/jaegertracing/jaeger/internal/metricstest"
-	"github.com/jaegertracing/jaeger/pkg/config/tlscfg"
 	"github.com/jaegertracing/jaeger/pkg/healthcheck"
 	"github.com/jaegertracing/jaeger/ports"
 )
@@ -29,8 +32,10 @@ var testCertKeyLocation = "../../../../pkg/config/tlscfg/testdata"
 func TestFailToListenHTTP(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	server, err := StartHTTPServer(&HTTPServerParams{
-		HostPort: ":-1",
-		Logger:   logger,
+		ServerConfig: confighttp.ServerConfig{
+			Endpoint: ":-1",
+		},
+		Logger: logger,
 	})
 	assert.Nil(t, server)
 	require.EqualError(t, err, "listen tcp: address -1: invalid port")
@@ -38,22 +43,23 @@ func TestFailToListenHTTP(t *testing.T) {
 
 func TestCreateTLSHTTPServerError(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	tlsCfg := tlscfg.Options{
-		Enabled:      true,
-		CertPath:     "invalid/path",
-		KeyPath:      "invalid/path",
-		ClientCAPath: "invalid/path",
-	}
 
 	params := &HTTPServerParams{
-		HostPort:    fmt.Sprintf(":%d", ports.CollectorHTTP),
+		ServerConfig: confighttp.ServerConfig{
+			Endpoint: ":0",
+			TLSSetting: &configtls.ServerConfig{
+				Config: configtls.Config{
+					CertFile: "invalid/path",
+					KeyFile:  "invalid/path",
+					CAFile:   "invalid/path",
+				},
+			},
+		},
 		HealthCheck: healthcheck.New(),
 		Logger:      logger,
-		TLSConfig:   tlsCfg,
 	}
 	_, err := StartHTTPServer(params)
 	require.Error(t, err)
-	defer params.TLSConfig.Close()
 }
 
 func TestSpanCollectorHTTP(t *testing.T) {
@@ -68,11 +74,17 @@ func TestSpanCollectorHTTP(t *testing.T) {
 		Logger:           logger,
 	}
 
-	server := httptest.NewServer(nil)
+	server, _ := params.ToServer(context.Background(), nil, component.TelemetrySettings{
+		Logger: logger,
+	}, nil)
+	listener, _ := params.ToListener(context.Background())
 
-	serveHTTP(server.Config, server.Listener, params)
-
-	response, err := http.Post(server.URL, "", nil)
+	serveHTTP(server, listener, params)
+	addr := listener.Addr().String()
+	host, port, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	url := fmt.Sprintf("http://%s:%s", host, port)
+	response, err := http.Post(url, "", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, response)
 	defer response.Body.Close()
@@ -82,20 +94,21 @@ func TestSpanCollectorHTTP(t *testing.T) {
 func TestSpanCollectorHTTPS(t *testing.T) {
 	testCases := []struct {
 		name              string
-		TLS               tlscfg.Options
-		clientTLS         tlscfg.Options
+		TLS               *configtls.ServerConfig
+		clientTLS         configtls.ClientConfig
 		expectError       bool
 		expectClientError bool
 	}{
 		{
 			name: "should fail with TLS client to untrusted TLS server",
-			TLS: tlscfg.Options{
-				Enabled:  true,
-				CertPath: testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:  testCertKeyLocation + "/example-server-key.pem",
+			TLS: &configtls.ServerConfig{
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
+			clientTLS: configtls.ClientConfig{
+				Insecure:   false,
 				ServerName: "example.com",
 			},
 			expectError:       true,
@@ -103,14 +116,17 @@ func TestSpanCollectorHTTPS(t *testing.T) {
 		},
 		{
 			name: "should fail with TLS client to trusted TLS server with incorrect hostname",
-			TLS: tlscfg.Options{
-				Enabled:  true,
-				CertPath: testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:  testCertKeyLocation + "/example-server-key.pem",
+			TLS: &configtls.ServerConfig{
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure: false,
+				Config: configtls.Config{
+					CAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				},
 				ServerName: "nonEmpty",
 			},
 			expectError:       true,
@@ -118,62 +134,74 @@ func TestSpanCollectorHTTPS(t *testing.T) {
 		},
 		{
 			name: "should pass with TLS client to trusted TLS server with correct hostname",
-			TLS: tlscfg.Options{
-				Enabled:  true,
-				CertPath: testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:  testCertKeyLocation + "/example-server-key.pem",
+			TLS: &configtls.ServerConfig{
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure: false,
+				Config: configtls.Config{
+					CAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				},
 				ServerName: "example.com",
 			},
 		},
 		{
 			name: "should fail with TLS client without cert to trusted TLS server requiring cert",
-			TLS: tlscfg.Options{
-				Enabled:      true,
-				CertPath:     testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:      testCertKeyLocation + "/example-server-key.pem",
-				ClientCAPath: testCertKeyLocation + "/example-CA-cert.pem",
+			TLS: &configtls.ServerConfig{
+				ClientCAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure:   false,
 				ServerName: "example.com",
+				Config: configtls.Config{
+					CAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				},
 			},
 			expectClientError: true,
 		},
 		{
 			name: "should pass with TLS client with cert to trusted TLS server requiring cert",
-			TLS: tlscfg.Options{
-				Enabled:      true,
-				CertPath:     testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:      testCertKeyLocation + "/example-server-key.pem",
-				ClientCAPath: testCertKeyLocation + "/example-CA-cert.pem",
+			TLS: &configtls.ServerConfig{
+				ClientCAFile: testCertKeyLocation + "/example-CA-cert.pem",
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure:   true,
 				ServerName: "example.com",
-				CertPath:   testCertKeyLocation + "/example-client-cert.pem",
-				KeyPath:    testCertKeyLocation + "/example-client-key.pem",
+				Config: configtls.Config{
+					CAFile:   testCertKeyLocation + "/example-CA-cert.pem",
+					CertFile: testCertKeyLocation + "/example-client-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-client-key.pem",
+				},
 			},
 		},
 		{
 			name: "should fail with TLS client without cert to trusted TLS server requiring cert from a different CA",
-			TLS: tlscfg.Options{
-				Enabled:      true,
-				CertPath:     testCertKeyLocation + "/example-server-cert.pem",
-				KeyPath:      testCertKeyLocation + "/example-server-key.pem",
-				ClientCAPath: testCertKeyLocation + "/wrong-CA-cert.pem", // NB: wrong CA
+			TLS: &configtls.ServerConfig{
+				ClientCAFile: testCertKeyLocation + "/wrong-CA-cert.pem", // NB: wrong CA
+				Config: configtls.Config{
+					CertFile: testCertKeyLocation + "/example-server-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-server-key.pem",
+				},
 			},
-			clientTLS: tlscfg.Options{
-				Enabled:    true,
-				CAPath:     testCertKeyLocation + "/example-CA-cert.pem",
+			clientTLS: configtls.ClientConfig{
+				Insecure:   false,
 				ServerName: "example.com",
-				CertPath:   testCertKeyLocation + "/example-client-cert.pem",
-				KeyPath:    testCertKeyLocation + "/example-client-key.pem",
+				Config: configtls.Config{
+					CAFile:   testCertKeyLocation + "/example-CA-cert.pem",
+					CertFile: testCertKeyLocation + "/example-client-cert.pem",
+					KeyFile:  testCertKeyLocation + "/example-client-key.pem",
+				},
 			},
 			expectClientError: true,
 		},
@@ -187,15 +215,16 @@ func TestSpanCollectorHTTPS(t *testing.T) {
 			mFact := metricstest.NewFactory(time.Hour)
 			defer mFact.Backend.Stop()
 			params := &HTTPServerParams{
-				HostPort:         fmt.Sprintf(":%d", ports.CollectorHTTP),
+				ServerConfig: confighttp.ServerConfig{
+					Endpoint:   fmt.Sprintf(":%d", ports.CollectorHTTP),
+					TLSSetting: test.TLS,
+				},
 				Handler:          handler.NewJaegerSpanHandler(logger, &mockSpanProcessor{}),
 				SamplingProvider: &mockSamplingProvider{},
 				MetricsFactory:   mFact,
 				HealthCheck:      healthcheck.New(),
 				Logger:           logger,
-				TLSConfig:        test.TLS,
 			}
-			defer params.TLSConfig.Close()
 
 			server, err := StartHTTPServer(params)
 			require.NoError(t, err)
@@ -203,11 +232,10 @@ func TestSpanCollectorHTTPS(t *testing.T) {
 				require.NoError(t, server.Close())
 			}()
 
-			clientTLSCfg, err0 := test.clientTLS.Config(logger)
-			defer test.clientTLS.Close()
+			clientTLSCfg, err0 := test.clientTLS.LoadTLSConfig(context.Background())
 			require.NoError(t, err0)
 			dialer := &net.Dialer{Timeout: 2 * time.Second}
-			conn, clientError := tls.DialWithDialer(dialer, "tcp", "localhost:"+fmt.Sprintf("%d", ports.CollectorHTTP), clientTLSCfg)
+			conn, clientError := tls.DialWithDialer(dialer, "tcp", "localhost:"+strconv.Itoa(ports.CollectorHTTP), clientTLSCfg)
 			var clientClose func() error
 			clientClose = nil
 			if conn != nil {
@@ -230,7 +258,7 @@ func TestSpanCollectorHTTPS(t *testing.T) {
 				},
 			}
 
-			response, requestError := client.Post("https://localhost:"+fmt.Sprintf("%d", ports.CollectorHTTP), "", nil)
+			response, requestError := client.Post("https://localhost:"+strconv.Itoa(ports.CollectorHTTP), "", nil)
 
 			if test.expectClientError {
 				require.Error(t, requestError)
@@ -249,15 +277,17 @@ func TestStartHTTPServerParams(t *testing.T) {
 	mFact := metricstest.NewFactory(time.Hour)
 	defer mFact.Stop()
 	params := &HTTPServerParams{
-		HostPort:          fmt.Sprintf(":%d", ports.CollectorHTTP),
-		Handler:           handler.NewJaegerSpanHandler(logger, &mockSpanProcessor{}),
-		SamplingProvider:  &mockSamplingProvider{},
-		MetricsFactory:    mFact,
-		HealthCheck:       healthcheck.New(),
-		Logger:            logger,
-		IdleTimeout:       5 * time.Minute,
-		ReadTimeout:       6 * time.Minute,
-		ReadHeaderTimeout: 7 * time.Second,
+		ServerConfig: confighttp.ServerConfig{
+			Endpoint:          fmt.Sprintf(":%d", ports.CollectorHTTP),
+			IdleTimeout:       5 * time.Minute,
+			ReadTimeout:       6 * time.Minute,
+			ReadHeaderTimeout: 7 * time.Second,
+		},
+		Handler:          handler.NewJaegerSpanHandler(logger, &mockSpanProcessor{}),
+		SamplingProvider: &mockSamplingProvider{},
+		MetricsFactory:   mFact,
+		HealthCheck:      healthcheck.New(),
+		Logger:           logger,
 	}
 
 	server, err := StartHTTPServer(params)

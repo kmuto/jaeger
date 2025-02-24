@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
+	api_v1 "github.com/jaegertracing/jaeger-idl/thrift-gen/sampling"
 	thriftconv "github.com/jaegertracing/jaeger/model/converter/thrift/jaeger"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
-	api_v1 "github.com/jaegertracing/jaeger/thrift-gen/sampling"
 )
 
 func TestSamplingStrategyResponseToJSON_Error(t *testing.T) {
@@ -91,10 +91,10 @@ func TestSamplingStrategyResponseFromJSON(t *testing.T) {
 			SamplingRate: 0.42,
 		},
 	}
-	json, err := SamplingStrategyResponseToJSON(s1)
+	jsonData, err := SamplingStrategyResponseToJSON(s1)
 	require.NoError(t, err)
 
-	s2, err := SamplingStrategyResponseFromJSON([]byte(json))
+	s2, err := SamplingStrategyResponseFromJSON([]byte(jsonData))
 	require.NoError(t, err)
 	assert.Equal(t, s1.GetStrategyType(), s2.GetStrategyType())
 	assert.EqualValues(t, s1.GetProbabilisticSampling(), s2.GetProbabilisticSampling())

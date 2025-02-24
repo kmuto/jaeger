@@ -5,17 +5,17 @@
 package sanitizer
 
 import (
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/sanitizer/cache"
-	"github.com/jaegertracing/jaeger/model"
 )
 
 // NewServiceNameSanitizer creates a service name sanitizer.
-func NewServiceNameSanitizer(cache cache.Cache) SanitizeSpan {
-	sanitizer := serviceNameSanitizer{cache: cache}
+func NewServiceNameSanitizer(c cache.Cache) SanitizeSpan {
+	sanitizer := serviceNameSanitizer{cache: c}
 	return sanitizer.Sanitize
 }
 
-// ServiceNameSanitizer sanitizes the service names in span annotations given a source of truth alias to service cache.
+// serviceNameSanitizer sanitizes the service names in span annotations given a source of truth alias to service cache.
 type serviceNameSanitizer struct {
 	cache cache.Cache
 }

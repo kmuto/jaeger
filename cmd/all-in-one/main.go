@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,12 +14,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	_ "go.uber.org/automaxprocs"
 	"go.uber.org/zap"
 
-	agentApp "github.com/jaegertracing/jaeger/cmd/agent/app"
-	agentRep "github.com/jaegertracing/jaeger/cmd/agent/app/reporter"
-	agentGrpcRep "github.com/jaegertracing/jaeger/cmd/agent/app/reporter/grpc"
 	"github.com/jaegertracing/jaeger/cmd/all-in-one/setupcontext"
 	collectorApp "github.com/jaegertracing/jaeger/cmd/collector/app"
 	collectorFlags "github.com/jaegertracing/jaeger/cmd/collector/app/flags"
@@ -29,24 +28,25 @@ import (
 	"github.com/jaegertracing/jaeger/cmd/internal/status"
 	queryApp "github.com/jaegertracing/jaeger/cmd/query/app"
 	"github.com/jaegertracing/jaeger/cmd/query/app/querysvc"
+	v2querysvc "github.com/jaegertracing/jaeger/cmd/query/app/querysvc/v2/querysvc"
+	ss "github.com/jaegertracing/jaeger/internal/sampling/samplingstrategy/metafactory"
+	"github.com/jaegertracing/jaeger/internal/storage/metricstore"
+	storage "github.com/jaegertracing/jaeger/internal/storage/v1/factory"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/pkg/config"
 	"github.com/jaegertracing/jaeger/pkg/jtracer"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
-	"github.com/jaegertracing/jaeger/pkg/telemetery"
+	"github.com/jaegertracing/jaeger/pkg/telemetry"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
 	"github.com/jaegertracing/jaeger/pkg/version"
-	metricsPlugin "github.com/jaegertracing/jaeger/plugin/metrics"
-	ss "github.com/jaegertracing/jaeger/plugin/sampling/strategyprovider"
-	"github.com/jaegertracing/jaeger/plugin/storage"
 	"github.com/jaegertracing/jaeger/ports"
-	"github.com/jaegertracing/jaeger/storage/dependencystore"
-	metricsstoreMetrics "github.com/jaegertracing/jaeger/storage/metricsstore/metrics"
-	"github.com/jaegertracing/jaeger/storage/spanstore"
-	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
 )
 
 // all-in-one/main is a standalone full-stack jaeger backend, backed by a memory store
 func main() {
+	flags.PrintV1EOL()
 	setupcontext.SetAllInOne()
 
 	svc := flags.NewService(ports.CollectorAdminHTTP)
@@ -54,7 +54,7 @@ func main() {
 	if os.Getenv(storage.SpanStorageTypeEnvVar) == "" {
 		os.Setenv(storage.SpanStorageTypeEnvVar, "memory") // other storage types default to SpanStorage
 	}
-	storageFactory, err := storage.NewFactory(storage.FactoryConfigFromEnvAndCLI(os.Args, os.Stderr))
+	storageFactory, err := storage.NewFactory(storage.ConfigFromEnvAndCLI(os.Args, os.Stderr))
 	if err != nil {
 		log.Fatalf("Cannot initialize storage factory: %v", err)
 	}
@@ -67,8 +67,8 @@ func main() {
 		log.Fatalf("Cannot initialize sampling strategy factory: %v", err)
 	}
 
-	fc := metricsPlugin.FactoryConfigFromEnv()
-	metricsReaderFactory, err := metricsPlugin.NewFactory(fc)
+	fc := metricstore.FactoryConfigFromEnv()
+	metricsReaderFactory, err := metricstore.NewFactory(fc)
 	if err != nil {
 		log.Fatalf("Cannot initialize metrics store factory: %v", err)
 	}
@@ -76,8 +76,8 @@ func main() {
 	v := viper.New()
 	command := &cobra.Command{
 		Use:   "jaeger-all-in-one",
-		Short: "Jaeger all-in-one distribution with agent, collector and query in one process.",
-		Long: `Jaeger all-in-one distribution with agent, collector and query. Use with caution this version
+		Short: "Jaeger all-in-one distribution with collector and query in one process.",
+		Long: `Jaeger all-in-one distribution with collector and query. Use with caution: this version
 by default uses only in-memory database.`,
 		RunE: func(_ *cobra.Command, _ /* args */ []string) error {
 			if err := svc.Start(v); err != nil {
@@ -86,7 +86,6 @@ by default uses only in-memory database.`,
 			logger := svc.Logger // shortcut
 			baseFactory := svc.MetricsFactory.Namespace(metrics.NSOptions{Name: "jaeger"})
 			version.NewInfoMetrics(baseFactory)
-			agentMetricsFactory := baseFactory.Namespace(metrics.NSOptions{Name: "agent"})
 			collectorMetricsFactory := baseFactory.Namespace(metrics.NSOptions{Name: "collector"})
 			queryMetricsFactory := baseFactory.Namespace(metrics.NSOptions{Name: "query"})
 
@@ -95,12 +94,21 @@ by default uses only in-memory database.`,
 				logger.Fatal("Failed to initialize tracer", zap.Error(err))
 			}
 
+			baseTelset := telemetry.Settings{
+				Logger:         svc.Logger,
+				TracerProvider: tracer.OTEL,
+				Metrics:        baseFactory,
+				MeterProvider:  noopmetric.NewMeterProvider(),
+				ReportStatus:   telemetry.HCAdapter(svc.HC()),
+			}
+
 			storageFactory.InitFromViper(v, logger)
-			if err := storageFactory.Initialize(baseFactory, logger); err != nil {
+			if err := storageFactory.Initialize(baseTelset.Metrics, baseTelset.Logger); err != nil {
 				logger.Fatal("Failed to init storage factory", zap.Error(err))
 			}
 
-			spanReader, err := storageFactory.CreateSpanReader()
+			v2Factory := v1adapter.NewFactory(storageFactory)
+			traceReader, err := v2Factory.CreateTraceReader()
 			if err != nil {
 				logger.Fatal("Failed to create span reader", zap.Error(err))
 			}
@@ -108,12 +116,16 @@ by default uses only in-memory database.`,
 			if err != nil {
 				logger.Fatal("Failed to create span writer", zap.Error(err))
 			}
-			dependencyReader, err := storageFactory.CreateDependencyReader()
+			depstoreFactory, ok := v2Factory.(depstore.Factory)
+			if !ok {
+				logger.Fatal("Failed to create dependency reader", zap.Error(err))
+			}
+			dependencyReader, err := depstoreFactory.CreateDependencyReader()
 			if err != nil {
 				logger.Fatal("Failed to create dependency reader", zap.Error(err))
 			}
 
-			metricsQueryService, err := createMetricsQueryService(metricsReaderFactory, v, logger, queryMetricsFactory)
+			metricsQueryService, err := createMetricsQueryService(metricsReaderFactory, v, baseTelset)
 			if err != nil {
 				logger.Fatal("Failed to create metrics reader", zap.Error(err))
 			}
@@ -132,29 +144,24 @@ by default uses only in-memory database.`,
 				logger.Fatal("Failed to create sampling strategy provider", zap.Error(err))
 			}
 
-			aOpts := new(agentApp.Builder).InitFromViper(v)
-			repOpts := new(agentRep.Options).InitFromViper(v, logger)
-			grpcBuilder, err := agentGrpcRep.NewConnBuilder().InitFromViper(v)
-			if err != nil {
-				logger.Fatal("Failed to configure connection for grpc", zap.Error(err))
-			}
 			cOpts, err := new(collectorFlags.CollectorOptions).InitFromViper(v, logger)
 			if err != nil {
 				logger.Fatal("Failed to initialize collector", zap.Error(err))
 			}
-			qOpts, err := new(queryApp.QueryOptions).InitFromViper(v, logger)
+			defaultOpts := queryApp.DefaultQueryOptions()
+			qOpts, err := defaultOpts.InitFromViper(v, logger)
 			if err != nil {
 				logger.Fatal("Failed to configure query service", zap.Error(err))
 			}
 
-			tm := tenancy.NewManager(&cOpts.GRPC.Tenancy)
+			tm := tenancy.NewManager(&cOpts.Tenancy)
 
 			// collector
 			c := collectorApp.New(&collectorApp.CollectorParams{
 				ServiceName:        "jaeger-collector",
 				Logger:             logger,
 				MetricsFactory:     collectorMetricsFactory,
-				SpanWriter:         spanWriter,
+				TraceWriter:        v1adapter.NewTraceWriter(spanWriter),
 				SamplingProvider:   samplingProvider,
 				SamplingAggregator: samplingAggregator,
 				HealthCheck:        svc.HC(),
@@ -164,53 +171,27 @@ by default uses only in-memory database.`,
 				log.Fatal(err)
 			}
 
-			// agent
-			// if the agent reporter grpc host:port was not explicitly set then use whatever the collector is listening on
-			if len(grpcBuilder.CollectorHostPorts) == 0 {
-				grpcBuilder.CollectorHostPorts = append(grpcBuilder.CollectorHostPorts, cOpts.GRPC.HostPort)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			builders := map[agentRep.Type]agentApp.CollectorProxyBuilder{
-				agentRep.GRPC: agentApp.GRPCCollectorProxyBuilder(grpcBuilder),
-			}
-			cp, err := agentApp.CreateCollectorProxy(ctx, agentApp.ProxyBuilderOptions{
-				Options: *repOpts,
-				Logger:  logger,
-				Metrics: agentMetricsFactory,
-			}, builders)
-			if err != nil {
-				logger.Fatal("Could not create collector proxy", zap.Error(err))
-			}
-			agent := startAgent(cp, aOpts, logger, agentMetricsFactory)
-			telset := telemetery.Setting{
-				Logger:         svc.Logger,
-				TracerProvider: tracer.OTEL,
-				Metrics:        queryMetricsFactory,
-				ReportStatus:   telemetery.HCAdapter(svc.HC()),
-			}
 			// query
+			queryTelset := baseTelset // copy
+			queryTelset.Metrics = queryMetricsFactory
+			querySvcOpts, v2querySvcOpts := qOpts.BuildQueryServiceOptions(storageFactory.InitArchiveStorage, logger)
 			querySrv := startQuery(
-				svc, qOpts, qOpts.BuildQueryServiceOptions(storageFactory, logger),
-				spanReader, dependencyReader, metricsQueryService,
-				tm, telset,
+				svc, qOpts, querySvcOpts, v2querySvcOpts,
+				traceReader, dependencyReader, metricsQueryService,
+				tm, queryTelset,
 			)
 
 			svc.RunAndThen(func() {
-				agent.Stop()
-				_ = cp.Close()
-				_ = c.Close()
-				_ = querySrv.Close()
+				var errs []error
+				errs = append(errs, c.Close())
+				errs = append(errs, querySrv.Close())
 				if closer, ok := spanWriter.(io.Closer); ok {
-					if err := closer.Close(); err != nil {
-						logger.Error("Failed to close span writer", zap.Error(err))
-					}
+					errs = append(errs, closer.Close())
 				}
-				if err := storageFactory.Close(); err != nil {
-					logger.Error("Failed to close storage factory", zap.Error(err))
-				}
-				if err := tracer.Close(context.Background()); err != nil {
-					logger.Error("Error shutting down tracer provider", zap.Error(err))
+				errs = append(errs, storageFactory.Close())
+				errs = append(errs, tracer.Close(context.Background()))
+				if err := errors.Join(errs...); err != nil {
+					logger.Error("Failed to close services", zap.Error(err))
 				}
 			})
 			return nil
@@ -228,9 +209,6 @@ by default uses only in-memory database.`,
 		command,
 		svc.AddFlags,
 		storageFactory.AddPipelineFlags,
-		agentApp.AddFlags,
-		agentRep.AddFlags,
-		agentGrpcRep.AddFlags,
 		collectorFlags.AddFlags,
 		queryApp.AddFlags,
 		samplingStrategyFactory.AddFlags,
@@ -242,43 +220,25 @@ by default uses only in-memory database.`,
 	}
 }
 
-func startAgent(
-	cp agentApp.CollectorProxy,
-	b *agentApp.Builder,
-	logger *zap.Logger,
-	baseFactory metrics.Factory,
-) *agentApp.Agent {
-	agent, err := b.CreateAgent(cp, logger, baseFactory)
-	if err != nil {
-		logger.Fatal("Unable to initialize Jaeger Agent", zap.Error(err))
-	}
-
-	logger.Info("Starting agent")
-	if err := agent.Run(); err != nil {
-		logger.Fatal("Failed to run the agent", zap.Error(err))
-	}
-
-	return agent
-}
-
 func startQuery(
 	svc *flags.Service,
 	qOpts *queryApp.QueryOptions,
 	queryOpts *querysvc.QueryServiceOptions,
-	spanReader spanstore.Reader,
-	depReader dependencystore.Reader,
+	v2QueryOpts *v2querysvc.QueryServiceOptions,
+	traceReader tracestore.Reader,
+	depReader depstore.Reader,
 	metricsQueryService querysvc.MetricsQueryService,
 	tm *tenancy.Manager,
-	telset telemetery.Setting,
+	telset telemetry.Settings,
 ) *queryApp.Server {
-	spanReader = storageMetrics.NewReadMetricsDecorator(spanReader, telset.Metrics)
-	qs := querysvc.NewQueryService(spanReader, depReader, *queryOpts)
+	qs := querysvc.NewQueryService(traceReader, depReader, *queryOpts)
+	v2qs := v2querysvc.NewQueryService(traceReader, depReader, *v2QueryOpts)
 
-	server, err := queryApp.NewServer(qs, metricsQueryService, qOpts, tm, telset)
+	server, err := queryApp.NewServer(context.Background(), qs, v2qs, metricsQueryService, qOpts, tm, telset)
 	if err != nil {
 		svc.Logger.Fatal("Could not create jaeger-query", zap.Error(err))
 	}
-	if err := server.Start(); err != nil {
+	if err := server.Start(context.Background()); err != nil {
 		svc.Logger.Fatal("Could not start jaeger-query", zap.Error(err))
 	}
 
@@ -286,22 +246,20 @@ func startQuery(
 }
 
 func createMetricsQueryService(
-	metricsReaderFactory *metricsPlugin.Factory,
+	metricsReaderFactory *metricstore.Factory,
 	v *viper.Viper,
-	logger *zap.Logger,
-	metricsReaderMetricsFactory metrics.Factory,
+	telset telemetry.Settings,
 ) (querysvc.MetricsQueryService, error) {
-	if err := metricsReaderFactory.Initialize(logger); err != nil {
+	if err := metricsReaderFactory.Initialize(telset); err != nil {
 		return nil, fmt.Errorf("failed to init metrics reader factory: %w", err)
 	}
 
 	// Ensure default parameter values are loaded correctly.
-	metricsReaderFactory.InitFromViper(v, logger)
+	metricsReaderFactory.InitFromViper(v, telset.Logger)
 	reader, err := metricsReaderFactory.CreateMetricsReader()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics reader: %w", err)
 	}
 
-	// Decorate the metrics reader with metrics instrumentation.
-	return metricsstoreMetrics.NewReadMetricsDecorator(reader, metricsReaderMetricsFactory), nil
+	return reader, nil
 }

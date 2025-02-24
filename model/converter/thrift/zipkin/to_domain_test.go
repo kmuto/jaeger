@@ -20,10 +20,9 @@ import (
 	"github.com/kr/pretty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
 
-	"github.com/jaegertracing/jaeger/model"
-	z "github.com/jaegertracing/jaeger/thrift-gen/zipkincore"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	z "github.com/jaegertracing/jaeger-idl/thrift-gen/zipkincore"
 )
 
 const NumberOfFixtures = 3
@@ -65,19 +64,19 @@ func TestToDomain(t *testing.T) {
 
 func TestToDomainNoServiceNameError(t *testing.T) {
 	zSpans := getZipkinSpans(t, `[{ "trace_id": -1, "id": 31 }]`)
-	trace, err := ToDomain(zSpans)
+	trc, err := ToDomain(zSpans)
 	require.EqualError(t, err, "cannot find service name in Zipkin span [traceID=ffffffffffffffff, spanID=1f]")
-	assert.Len(t, trace.Spans, 1)
-	assert.Equal(t, "unknown-service-name", trace.Spans[0].Process.ServiceName)
+	assert.Len(t, trc.Spans, 1)
+	assert.Equal(t, "unknown-service-name", trc.Spans[0].Process.ServiceName)
 }
 
 func TestToDomainServiceNameInBinAnnotation(t *testing.T) {
 	zSpans := getZipkinSpans(t, `[{ "trace_id": -1, "id": 31,
 	"binary_annotations": [{"key": "foo", "host": {"service_name": "bar", "ipv4": 23456}}] }]`)
-	trace, err := ToDomain(zSpans)
+	trc, err := ToDomain(zSpans)
 	require.NoError(t, err)
-	assert.Len(t, trace.Spans, 1)
-	assert.Equal(t, "bar", trace.Spans[0].Process.ServiceName)
+	assert.Len(t, trc.Spans, 1)
+	assert.Equal(t, "bar", trc.Spans[0].Process.ServiceName)
 }
 
 func TestToDomainWithDurationFromServerAnnotations(t *testing.T) {
@@ -85,10 +84,10 @@ func TestToDomainWithDurationFromServerAnnotations(t *testing.T) {
 	{"value": "sr", "timestamp": 1, "host": {"service_name": "bar", "ipv4": 23456}},
 	{"value": "ss", "timestamp": 10, "host": {"service_name": "bar", "ipv4": 23456}}
 	]}]`)
-	trace, err := ToDomain(zSpans)
+	trc, err := ToDomain(zSpans)
 	require.NoError(t, err)
-	assert.Equal(t, 1000, int(trace.Spans[0].StartTime.Nanosecond()))
-	assert.Equal(t, 9000, int(trace.Spans[0].Duration))
+	assert.Equal(t, 1000, int(trc.Spans[0].StartTime.Nanosecond()))
+	assert.Equal(t, 9000, int(trc.Spans[0].Duration))
 }
 
 func TestToDomainWithDurationFromClientAnnotations(t *testing.T) {
@@ -96,10 +95,10 @@ func TestToDomainWithDurationFromClientAnnotations(t *testing.T) {
 	{"value": "cs", "timestamp": 1, "host": {"service_name": "bar", "ipv4": 23456}},
 	{"value": "cr", "timestamp": 10, "host": {"service_name": "bar", "ipv4": 23456}}
 	]}]`)
-	trace, err := ToDomain(zSpans)
+	trc, err := ToDomain(zSpans)
 	require.NoError(t, err)
-	assert.Equal(t, 1000, int(trace.Spans[0].StartTime.Nanosecond()))
-	assert.Equal(t, 9000, int(trace.Spans[0].Duration))
+	assert.Equal(t, 1000, int(trc.Spans[0].StartTime.Nanosecond()))
+	assert.Equal(t, 9000, int(trc.Spans[0].Duration))
 }
 
 func TestToDomainMultipleSpanKinds(t *testing.T) {
@@ -107,8 +106,8 @@ func TestToDomainMultipleSpanKinds(t *testing.T) {
 		json         string
 		tagFirstKey  string
 		tagSecondKey string
-		tagFirstVal  trace.SpanKind
-		tagSecondVal trace.SpanKind
+		tagFirstVal  model.SpanKind
+		tagSecondVal model.SpanKind
 	}{
 		{
 			json: `[{ "trace_id": -1, "id": 31, "annotations": [
@@ -116,10 +115,10 @@ func TestToDomainMultipleSpanKinds(t *testing.T) {
 		{"value": "sr", "timestamp": 1, "host": {"service_name": "bar", "ipv4": 23456}},
 		{"value": "ss", "timestamp": 2, "host": {"service_name": "bar", "ipv4": 23456}}
 		]}]`,
-			tagFirstKey:  keySpanKind,
-			tagSecondKey: keySpanKind,
-			tagFirstVal:  trace.SpanKindClient,
-			tagSecondVal: trace.SpanKindServer,
+			tagFirstKey:  model.SpanKindKey,
+			tagSecondKey: model.SpanKindKey,
+			tagFirstVal:  model.SpanKindClient,
+			tagSecondVal: model.SpanKindServer,
 		},
 		{
 			json: `[{ "trace_id": -1, "id": 31, "annotations": [
@@ -127,26 +126,26 @@ func TestToDomainMultipleSpanKinds(t *testing.T) {
 		{"value": "cs", "timestamp": 1, "host": {"service_name": "bar", "ipv4": 23456}},
 		{"value": "cr", "timestamp": 2, "host": {"service_name": "bar", "ipv4": 23456}}
 		]}]`,
-			tagFirstKey:  keySpanKind,
-			tagSecondKey: keySpanKind,
-			tagFirstVal:  trace.SpanKindServer,
-			tagSecondVal: trace.SpanKindClient,
+			tagFirstKey:  model.SpanKindKey,
+			tagSecondKey: model.SpanKindKey,
+			tagFirstVal:  model.SpanKindServer,
+			tagSecondVal: model.SpanKindClient,
 		},
 	}
 
 	for _, test := range tests {
-		trace, err := ToDomain(getZipkinSpans(t, test.json))
+		trc, err := ToDomain(getZipkinSpans(t, test.json))
 		require.NoError(t, err)
 
-		assert.Len(t, trace.Spans, 2)
-		assert.Len(t, trace.Spans[0].Tags, 1)
-		assert.Equal(t, test.tagFirstKey, trace.Spans[0].Tags[0].Key)
-		assert.Equal(t, test.tagFirstVal.String(), trace.Spans[0].Tags[0].VStr)
+		assert.Len(t, trc.Spans, 2)
+		assert.Len(t, trc.Spans[0].Tags, 1)
+		assert.Equal(t, test.tagFirstKey, trc.Spans[0].Tags[0].Key)
+		assert.EqualValues(t, test.tagFirstVal, trc.Spans[0].Tags[0].VStr)
 
-		assert.Len(t, trace.Spans[1].Tags, 1)
-		assert.Equal(t, test.tagSecondKey, trace.Spans[1].Tags[0].Key)
-		assert.Equal(t, time.Duration(1000), trace.Spans[1].Duration)
-		assert.Equal(t, test.tagSecondVal.String(), trace.Spans[1].Tags[0].VStr)
+		assert.Len(t, trc.Spans[1].Tags, 1)
+		assert.Equal(t, test.tagSecondKey, trc.Spans[1].Tags[0].Key)
+		assert.Equal(t, time.Duration(1000), trc.Spans[1].Duration)
+		assert.EqualValues(t, test.tagSecondVal, trc.Spans[1].Tags[0].VStr)
 	}
 }
 
@@ -181,9 +180,9 @@ func loadZipkinSpans(t *testing.T, file string) []*z.Span {
 }
 
 func loadJaegerTrace(t *testing.T, file string) *model.Trace {
-	var trace model.Trace
-	loadJSONPB(t, file, &trace)
-	return &trace
+	var trc model.Trace
+	loadJSONPB(t, file, &trc)
+	return &trc
 }
 
 func loadJSONPB(t *testing.T, fileName string, obj proto.Message) {

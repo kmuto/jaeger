@@ -18,10 +18,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
-	jThrift "github.com/jaegertracing/jaeger/thrift-gen/jaeger"
-	"github.com/jaegertracing/jaeger/thrift-gen/zipkincore"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
+	jThrift "github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/zipkincore"
 )
 
 type mockSpanHandler struct {
@@ -67,7 +67,7 @@ func TestReporter_EmitZipkinBatch(t *testing.T) {
 			expected: model.Batch{
 				Spans: []*model.Span{{
 					TraceID: model.NewTraceID(0, 1), SpanID: model.NewSpanID(2), OperationName: "jonatan", Duration: time.Microsecond * 1,
-					Tags:    model.KeyValues{{Key: "span.kind", VStr: "client", VType: model.StringType}},
+					Tags:    model.KeyValues{model.SpanKindTag(model.SpanKindClient)},
 					Process: &model.Process{ServiceName: "spring"}, StartTime: tm.UTC(),
 				}},
 			},
@@ -123,8 +123,7 @@ func TestReporter_SendFailure(t *testing.T) {
 	defer conn.Close()
 	rep := NewReporter(conn, nil, zap.NewNop())
 	err = rep.send(context.Background(), nil, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to export spans:")
+	assert.ErrorContains(t, err, "failed to export spans:")
 }
 
 func TestReporter_AddProcessTags_EmptyTags(t *testing.T) {
@@ -211,6 +210,6 @@ func TestReporter_MultitenantEmitBatch(t *testing.T) {
 	}
 	for _, test := range tests {
 		err = rep.EmitBatch(context.Background(), test.in)
-		assert.Contains(t, err.Error(), test.err)
+		assert.ErrorContains(t, err, test.err)
 	}
 }

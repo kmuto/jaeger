@@ -4,63 +4,44 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/collector/config/confighttp"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/jaegertracing/jaeger/cmd/collector/app/handler"
-	"github.com/jaegertracing/jaeger/cmd/collector/app/sampling/samplingstrategy"
-	clientcfgHandler "github.com/jaegertracing/jaeger/pkg/clientcfg/clientcfghttp"
-	"github.com/jaegertracing/jaeger/pkg/config/tlscfg"
+	samplinghttp "github.com/jaegertracing/jaeger/internal/sampling/http"
+	"github.com/jaegertracing/jaeger/internal/sampling/samplingstrategy"
 	"github.com/jaegertracing/jaeger/pkg/healthcheck"
 	"github.com/jaegertracing/jaeger/pkg/httpmetrics"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
 	"github.com/jaegertracing/jaeger/pkg/recoveryhandler"
+	"github.com/jaegertracing/jaeger/pkg/telemetry"
 )
 
 // HTTPServerParams to construct a new Jaeger Collector HTTP Server
 type HTTPServerParams struct {
-	TLSConfig        tlscfg.Options
-	HostPort         string
+	confighttp.ServerConfig
 	Handler          handler.JaegerBatchesHandler
 	SamplingProvider samplingstrategy.Provider
 	MetricsFactory   metrics.Factory
 	HealthCheck      *healthcheck.HealthCheck
 	Logger           *zap.Logger
-
-	// ReadTimeout sets the respective parameter of http.Server
-	ReadTimeout time.Duration
-	// ReadHeaderTimeout sets the respective parameter of http.Server
-	ReadHeaderTimeout time.Duration
-	// IdleTimeout sets the respective parameter of http.Server
-	IdleTimeout time.Duration
 }
 
 // StartHTTPServer based on the given parameters
 func StartHTTPServer(params *HTTPServerParams) (*http.Server, error) {
-	params.Logger.Info("Starting jaeger-collector HTTP server", zap.String("http host-port", params.HostPort))
-
-	errorLog, _ := zap.NewStdLogAt(params.Logger, zapcore.ErrorLevel)
-	server := &http.Server{
-		Addr:              params.HostPort,
-		ReadTimeout:       params.ReadTimeout,
-		ReadHeaderTimeout: params.ReadHeaderTimeout,
-		IdleTimeout:       params.IdleTimeout,
-		ErrorLog:          errorLog,
+	params.Logger.Info("Starting jaeger-collector HTTP server", zap.String("host-port", params.Endpoint))
+	listener, err := params.ToListener(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	if params.TLSConfig.Enabled {
-		tlsCfg, err := params.TLSConfig.Config(params.Logger) // This checks if the certificates are correctly provided
-		if err != nil {
-			return nil, err
-		}
-		server.TLSConfig = tlsCfg
-	}
-
-	listener, err := net.Listen("tcp", params.HostPort)
+	settings := telemetry.NoopSettings().ToOtelComponent()
+	settings.Logger = params.Logger
+	server, err := params.ToServer(context.Background(), nil, settings, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +56,9 @@ func serveHTTP(server *http.Server, listener net.Listener, params *HTTPServerPar
 	apiHandler := handler.NewAPIHandler(params.Handler)
 	apiHandler.RegisterRoutes(r)
 
-	cfgHandler := clientcfgHandler.NewHTTPHandler(clientcfgHandler.HTTPHandlerParams{
-		ConfigManager: &clientcfgHandler.ConfigManager{
+	cfgHandler := samplinghttp.NewHandler(samplinghttp.HandlerParams{
+		ConfigManager: &samplinghttp.ConfigManager{
 			SamplingProvider: params.SamplingProvider,
-			// TODO provide baggage manager
 		},
 		MetricsFactory:         params.MetricsFactory,
 		BasePath:               "/api",
@@ -89,12 +69,7 @@ func serveHTTP(server *http.Server, listener net.Listener, params *HTTPServerPar
 	recoveryHandler := recoveryhandler.NewRecoveryHandler(params.Logger, true)
 	server.Handler = httpmetrics.Wrap(recoveryHandler(r), params.MetricsFactory, params.Logger)
 	go func() {
-		var err error
-		if params.TLSConfig.Enabled {
-			err = server.ServeTLS(listener, "", "")
-		} else {
-			err = server.Serve(listener)
-		}
+		err := server.Serve(listener)
 		if err != nil {
 			if err != http.ErrServerClosed {
 				params.Logger.Error("Could not start HTTP collector", zap.Error(err))

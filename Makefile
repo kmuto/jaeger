@@ -29,10 +29,10 @@ ALL_SRC = $(shell find . -name '*.go' \
 				   -not -name 'mocks*' \
 				   -not -name '*.pb.go' \
 				   -not -path './vendor/*' \
+				   -not -path './idl/*' \
 				   -not -path './internal/tools/*' \
 				   -not -path './docker/debug/*' \
 				   -not -path '*/mocks/*' \
-				   -not -path '*/*-gen/*' \
 				   -not -path '*/thrift-0.9.2/*' \
 				   -type f | \
 				sort)
@@ -46,21 +46,26 @@ SCRIPTS_SRC = $(shell find . \( -name '*.sh' -o -name '*.py' -o -name '*.mk' -o 
 					sort)
 
 # ALL_PKGS is used with 'nocover' and 'goleak'
-ALL_PKGS = $(shell echo $(dir $(ALL_SRC)) | tr ' ' '\n' | sort -u)
+ALL_PKGS = $(shell echo $(dir $(ALL_SRC)) | tr ' ' '\n' | grep -v '/.*-gen/' | sort -u)
 
-UNAME := $(shell uname -m)
-ifeq ($(UNAME), s390x)
+GO=go
+GOOS ?= $(shell $(GO) env GOOS)
+GOARCH ?= $(shell $(GO) env GOARCH)
+
 # go test does not support -race flag on s390x architecture
+ifeq ($(GOARCH), s390x)
 	RACE=
 else
 	RACE=-race
 endif
 # sed on Mac does not support the same syntax for in-place updates as sed on Linux
 # When running on MacOS it's best to install gsed and run Makefile with SED=gsed
-SED=sed
-GO=go
-GOOS ?= $(shell $(GO) env GOOS)
-GOARCH ?= $(shell $(GO) env GOARCH)
+ifeq ($(GOOS),darwin)
+	SED=gsed
+else
+	SED=sed
+endif
+
 GOTEST_QUIET=$(GO) test $(RACE)
 GOTEST=$(GOTEST_QUIET) -v
 COVEROUT=cover.out
@@ -69,16 +74,17 @@ FMT_LOG=.fmt.log
 IMPORT_LOG=.import.log
 COLORIZE ?= | $(SED) 's/PASS/✅ PASS/g' | $(SED) 's/FAIL/❌ FAIL/g' | $(SED) 's/SKIP/🔕 SKIP/g'
 
-# import other Makefiles after the variables are defined
-include Makefile.BuildBinaries.mk
-include Makefile.BuildInfo.mk
-include Makefile.Crossdock.mk
-include Makefile.Docker.mk
-include Makefile.IntegrationTests.mk
-include Makefile.Protobuf.mk
-include Makefile.Thrift.mk
-include Makefile.Tools.mk
-include Makefile.Windows.mk
+ # import other Makefiles after the variables are defined
+
+include scripts/makefiles/BuildBinaries.mk
+include scripts/makefiles/BuildInfo.mk
+include scripts/makefiles/Crossdock.mk
+include scripts/makefiles/Docker.mk
+include scripts/makefiles/IntegrationTests.mk
+include scripts/makefiles/Protobuf.mk
+include scripts/makefiles/Tools.mk
+include scripts/makefiles/Windows.mk
+
 
 .DEFAULT_GOAL := test-and-lint
 
@@ -115,7 +121,7 @@ clean:
 		jaeger-ui/packages/jaeger-ui/build
 	find ./cmd/query/app/ui/actual -type f -name '*.gz' -delete
 	GOCACHE=$(GOCACHE) go clean -cache -testcache
-	bash scripts/clean-binaries.sh
+	bash scripts/build/clean-binaries.sh
 
 .PHONY: test
 test:
@@ -129,18 +135,18 @@ cover: nocover
 .PHONY: nocover
 nocover:
 	@echo Verifying that all packages have test files to count in coverage
-	@scripts/check-test-files.sh $(ALL_PKGS)
+	@scripts/lint/check-test-files.sh $(ALL_PKGS)
 
 .PHONY: fmt
 fmt: $(GOFUMPT)
 	@echo Running import-order-cleanup on ALL_SRC ...
-	@./scripts/import-order-cleanup.py -o inplace -t $(ALL_SRC)
+	@./scripts/lint/import-order-cleanup.py -o inplace -t $(ALL_SRC)
 	@echo Running gofmt on ALL_SRC ...
 	@$(GOFMT) -e -s -l -w $(ALL_SRC)
 	@echo Running gofumpt on ALL_SRC ...
 	@$(GOFUMPT) -e -l -w $(ALL_SRC)
 	@echo Running updateLicense.py on ALL_SRC ...
-	@./scripts/updateLicense.py $(ALL_SRC) $(SCRIPTS_SRC)
+	@./scripts/lint/updateLicense.py $(ALL_SRC) $(SCRIPTS_SRC)
 
 .PHONY: lint
 lint: lint-license lint-imports lint-semconv lint-goversion lint-goleak lint-go
@@ -148,14 +154,14 @@ lint: lint-license lint-imports lint-semconv lint-goversion lint-goleak lint-go
 .PHONY: lint-license
 lint-license:
 	@echo Verifying that all files have license headers
-	@./scripts/updateLicense.py $(ALL_SRC) $(SCRIPTS_SRC) > $(FMT_LOG)
+	@./scripts/lint/updateLicense.py $(ALL_SRC) $(SCRIPTS_SRC) > $(FMT_LOG)
 	@[ ! -s "$(FMT_LOG)" ] || (echo "License check failures, run 'make fmt'" | cat - $(FMT_LOG) && false)
 
 .PHONY: lint-nocommit
 lint-nocommit:
-	@if git diff main | grep '@no''commit' ; then \
+	@if git diff origin/main | grep '@no''commit' ; then \
 		echo "❌ Cannot merge PR that contains @no""commit string" ; \
-		GIT_PAGER=cat git diff -G '@no''commit' main ; \
+		GIT_PAGER=cat git diff -G '@no''commit' origin/main ; \
 		false ; \
 	else \
 		echo "✅ Changes do not contain @no""commit string" ; \
@@ -164,25 +170,30 @@ lint-nocommit:
 .PHONY: lint-imports
 lint-imports:
 	@echo Verifying that all Go files have correctly ordered imports
-	@./scripts/import-order-cleanup.py -o stdout -t $(ALL_SRC) > $(IMPORT_LOG)
+	@./scripts/lint/import-order-cleanup.py -o stdout -t $(ALL_SRC) > $(IMPORT_LOG)
 	@[ ! -s "$(IMPORT_LOG)" ] || (echo "Import ordering failures, run 'make fmt'" | cat - $(IMPORT_LOG) && false)
 
 .PHONY: lint-semconv
 lint-semconv:
-	./scripts/check-semconv-version.sh
+	./scripts/lint/check-semconv-version.sh
 
 .PHONY: lint-goversion
 lint-goversion:
-	./scripts/check-go-version.sh
+	./scripts/lint/check-go-version.sh
 
 .PHONY: lint-goleak
 lint-goleak:
 	@echo Verifying that all packages with tests have goleak in their TestMain
-	@scripts/check-goleak-files.sh $(ALL_PKGS)
+	@scripts/lint/check-goleak-files.sh $(ALL_PKGS)
 
 .PHONY: lint-go
 lint-go: $(LINT)
 	$(LINT) -v run
+
+.PHONY: lint-jaeger-idl-versions
+lint-jaeger-idl-versions:
+	@echo "checking jaeger-idl version mismatch between git submodule and go.mod dependency"
+	@./scripts/lint/check-jaeger-idl-version.sh
 
 .PHONY: run-all-in-one
 run-all-in-one: build-ui
@@ -190,11 +201,11 @@ run-all-in-one: build-ui
 
 .PHONY: changelog
 changelog:
-	./scripts/release-notes.py --exclude-dependabot --verbose
+	./scripts/release/notes.py --exclude-dependabot --verbose
 
 .PHONY: draft-release
 draft-release:
-	./scripts/draft-release.py
+	./scripts/release/draft.py
 
 .PHONY: test-ci
 test-ci: GOTEST := $(GOTEST_QUIET)
@@ -206,10 +217,8 @@ init-submodules:
 
 MOCKERY_FLAGS := --all --disable-version-string
 .PHONY: generate-mocks
-# TODO remove GODEBUG=gotypesalias=0
-# once this is fixed: https://github.com/vektra/mockery/issues/803
 generate-mocks: $(MOCKERY)
-	GODEBUG=gotypesalias=0 $(MOCKERY)
+	$(MOCKERY)
 
 .PHONY: certs
 certs:

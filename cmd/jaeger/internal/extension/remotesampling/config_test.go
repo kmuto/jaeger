@@ -45,11 +45,32 @@ func Test_Validate(t *testing.T) {
 			expectedErr: "",
 		},
 		{
-			name: "Invalid File provider",
+			name: "File provider can have empty file path",
 			config: &Config{
 				File: &FileConfig{Path: ""},
 			},
-			expectedErr: "File.Path: non zero value required",
+			expectedErr: "",
+		},
+		{
+			name: "File provider has negative reload interval",
+			config: &Config{
+				File: &FileConfig{Path: "", ReloadInterval: -1},
+			},
+			expectedErr: "must be a positive value",
+		},
+		{
+			name: "File provider has negative default sampling probability",
+			config: &Config{
+				File: &FileConfig{Path: "", DefaultSamplingProbability: -0.5},
+			},
+			expectedErr: "File.DefaultSamplingProbability: -0.5 does not validate as range(0|1)",
+		},
+		{
+			name: "File provider has default sampling probability greater than 1",
+			config: &Config{
+				File: &FileConfig{Path: "", DefaultSamplingProbability: 1.5},
+			},
+			expectedErr: "File.DefaultSamplingProbability: 1.5 does not validate as range(0|1)",
 		},
 		{
 			name: "Invalid Adaptive provider",
@@ -66,7 +87,7 @@ func Test_Validate(t *testing.T) {
 			if tt.expectedErr == "" {
 				require.NoError(t, err)
 			} else {
-				assert.Equal(t, tt.expectedErr, err.Error())
+				assert.ErrorContains(t, err, tt.expectedErr)
 			}
 		})
 	}

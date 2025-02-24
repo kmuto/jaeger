@@ -10,7 +10,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 // ClockSkew returns an adjuster that modifies start time and log timestamps
@@ -19,12 +19,11 @@ import (
 // child spans do not start before or end after their parent spans.
 //
 // The algorithm assumes that all spans have unique IDs, so the trace may need
-// to go through another adjuster first, such as SpanIDDeduper.
+// to go through another adjuster first, such as ZipkinSpanIDUniquifier.
 //
-// This adjuster never returns any errors. Instead it records any issues
-// it encounters in Span.Warnings.
+// Any issues encountered by the adjuster are recorded in Span.Warnings.
 func ClockSkew(maxDelta time.Duration) Adjuster {
-	return Func(func(trace *model.Trace) (*model.Trace, error) {
+	return Func(func(trace *model.Trace) {
 		adjuster := &clockSkewAdjuster{
 			trace:    trace,
 			maxDelta: maxDelta,
@@ -35,7 +34,6 @@ func ClockSkew(maxDelta time.Duration) Adjuster {
 			skew := clockSkew{hostKey: n.hostKey}
 			adjuster.adjustNode(n, nil, skew)
 		}
-		return adjuster.trace, nil
 	})
 }
 

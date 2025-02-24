@@ -10,13 +10,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	_ "google.golang.org/grpc/encoding/gzip" // register zip encoding
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
-	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
 )
 
 // GRPCHandler implements gRPC CollectorService.
@@ -47,7 +46,7 @@ func (g *GRPCHandler) PostSpans(ctx context.Context, r *api_v2.PostSpansRequest)
 type batchConsumer struct {
 	logger        *zap.Logger
 	spanProcessor processor.SpanProcessor
-	spanOptions   processor.SpansOptions
+	spanOptions   processor.Details // common settings for all spans
 	tenancyMgr    *tenancy.Manager
 }
 
@@ -55,7 +54,7 @@ func newBatchConsumer(logger *zap.Logger, spanProcessor processor.SpanProcessor,
 	return batchConsumer{
 		logger:        logger,
 		spanProcessor: spanProcessor,
-		spanOptions: processor.SpansOptions{
+		spanOptions: processor.Details{
 			InboundTransport: transport,
 			SpanFormat:       spanFormat,
 		},
@@ -75,10 +74,13 @@ func (c *batchConsumer) consume(ctx context.Context, batch *model.Batch) error {
 			span.Process = batch.Process
 		}
 	}
-	_, err = c.spanProcessor.ProcessSpans(batch.Spans, processor.SpansOptions{
-		InboundTransport: c.spanOptions.InboundTransport,
-		SpanFormat:       c.spanOptions.SpanFormat,
-		Tenant:           tenant,
+	_, err = c.spanProcessor.ProcessSpans(ctx, processor.SpansV1{
+		Spans: batch.Spans,
+		Details: processor.Details{
+			InboundTransport: c.spanOptions.InboundTransport,
+			SpanFormat:       c.spanOptions.SpanFormat,
+			Tenant:           tenant,
+		},
 	})
 	if err != nil {
 		if errors.Is(err, processor.ErrBusy) {
@@ -94,22 +96,5 @@ func (c *batchConsumer) validateTenant(ctx context.Context) (string, error) {
 	if !c.tenancyMgr.Enabled {
 		return "", nil
 	}
-
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", status.Errorf(codes.PermissionDenied, "missing tenant header")
-	}
-
-	tenants := md.Get(c.tenancyMgr.Header)
-	if len(tenants) < 1 {
-		return "", status.Errorf(codes.PermissionDenied, "missing tenant header")
-	} else if len(tenants) > 1 {
-		return "", status.Errorf(codes.PermissionDenied, "extra tenant header")
-	}
-
-	if !c.tenancyMgr.Valid(tenants[0]) {
-		return "", status.Errorf(codes.PermissionDenied, "unknown tenant")
-	}
-
-	return tenants[0], nil
+	return tenancy.GetValidTenant(ctx, c.tenancyMgr)
 }

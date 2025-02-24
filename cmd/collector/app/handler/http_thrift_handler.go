@@ -14,8 +14,8 @@ import (
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/gorilla/mux"
 
+	tJaeger "github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
-	tJaeger "github.com/jaegertracing/jaeger/thrift-gen/jaeger"
 )
 
 const (
@@ -75,7 +75,7 @@ func (aH *APIHandler) SaveSpan(w http.ResponseWriter, r *http.Request) {
 	}
 	batches := []*tJaeger.Batch{batch}
 	opts := SubmitBatchOptions{InboundTransport: processor.HTTPTransport}
-	if _, err = aH.jaegerBatchesHandler.SubmitBatches(batches, opts); err != nil {
+	if _, err = aH.jaegerBatchesHandler.SubmitBatches(r.Context(), batches, opts); err != nil {
 		http.Error(w, fmt.Sprintf("Cannot submit Jaeger batch: %v", err), http.StatusInternalServerError)
 		return
 	}

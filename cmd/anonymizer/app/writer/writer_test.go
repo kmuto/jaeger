@@ -4,18 +4,19 @@
 package writer
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 var tags = []model.KeyValue{
 	model.Bool("error", true),
-	model.String("http.method", "POST"),
+	model.String("http.method", http.MethodPost),
 	model.Bool("foobar", true),
 }
 

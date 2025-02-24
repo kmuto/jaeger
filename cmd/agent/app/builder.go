@@ -14,6 +14,7 @@ import (
 	"github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/zap"
 
+	agentThrift "github.com/jaegertracing/jaeger-idl/thrift-gen/agent"
 	"github.com/jaegertracing/jaeger/cmd/agent/app/configmanager"
 	"github.com/jaegertracing/jaeger/cmd/agent/app/httpserver"
 	"github.com/jaegertracing/jaeger/cmd/agent/app/processors"
@@ -22,8 +23,6 @@ import (
 	"github.com/jaegertracing/jaeger/cmd/agent/app/servers/thriftudp"
 	"github.com/jaegertracing/jaeger/internal/safeexpvar"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
-	"github.com/jaegertracing/jaeger/ports"
-	agentThrift "github.com/jaegertracing/jaeger/thrift-gen/agent"
 )
 
 const (
@@ -38,7 +37,7 @@ const (
 	binaryProtocol  Protocol = "binary"
 )
 
-var defaultHTTPServerHostPort = ":" + strconv.Itoa(ports.AgentConfigServerHTTP)
+var defaultHTTPServerHostPort = ":" + strconv.Itoa(AgentConfigServerHTTP)
 
 // Model used to distinguish the data transfer model
 type Model string
@@ -82,7 +81,7 @@ type ServerConfiguration struct {
 	HostPort         string `yaml:"hostPort" validate:"nonzero"`
 }
 
-// HTTPServerConfiguration holds config for a server providing sampling strategies and baggage restrictions to clients
+// HTTPServerConfiguration holds config for a server providing sampling strategies to clients
 type HTTPServerConfiguration struct {
 	HostPort string `yaml:"hostPort" validate:"nonzero"`
 }
@@ -96,14 +95,14 @@ func (b *Builder) WithReporter(r ...reporter.Reporter) *Builder {
 // CreateAgent creates the Agent
 func (b *Builder) CreateAgent(primaryProxy CollectorProxy, logger *zap.Logger, mFactory metrics.Factory) (*Agent, error) {
 	r := b.getReporter(primaryProxy)
-	processors, err := b.getProcessors(r, mFactory, logger)
+	procs, err := b.getProcessors(r, mFactory, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create processors: %w", err)
 	}
 	server := b.HTTPServer.getHTTPServer(primaryProxy.GetManager(), mFactory, logger)
 	b.publishOpts()
 
-	return NewAgent(processors, server, logger), nil
+	return NewAgent(procs, server, logger), nil
 }
 
 func (b *Builder) getReporter(primaryProxy CollectorProxy) reporter.Reporter {
@@ -141,11 +140,11 @@ func (b *Builder) getProcessors(rep reporter.Reporter, mFactory metrics.Factory,
 		default:
 			return nil, fmt.Errorf("cannot find agent processor for data model %v", cfg.Model)
 		}
-		metrics := mFactory.Namespace(metrics.NSOptions{Name: "", Tags: map[string]string{
+		metricsNamespace := mFactory.Namespace(metrics.NSOptions{Name: "", Tags: map[string]string{
 			"protocol": string(cfg.Protocol),
 			"model":    string(cfg.Model),
 		}})
-		processor, err := cfg.GetThriftProcessor(metrics, protoFactory, handler, logger)
+		processor, err := cfg.GetThriftProcessor(metricsNamespace, protoFactory, handler, logger)
 		if err != nil {
 			return nil, fmt.Errorf("cannot create Thrift Processor: %w", err)
 		}
@@ -154,7 +153,7 @@ func (b *Builder) getProcessors(rep reporter.Reporter, mFactory metrics.Factory,
 	return retMe, nil
 }
 
-// GetHTTPServer creates an HTTP server that provides sampling strategies and baggage restrictions to client libraries.
+// GetHTTPServer creates an HTTP server that provides sampling strategies to client libraries.
 func (c HTTPServerConfiguration) getHTTPServer(manager configmanager.ClientConfigManager, mFactory metrics.Factory, logger *zap.Logger) *http.Server {
 	hostPort := c.HostPort
 	if hostPort == "" {

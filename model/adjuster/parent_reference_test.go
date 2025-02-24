@@ -7,9 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 func TestParentReference(t *testing.T) {
@@ -96,8 +95,7 @@ func TestParentReference(t *testing.T) {
 					},
 				},
 			}
-			trace, err := ParentReference().Adjust(trace)
-			require.NoError(t, err)
+			ParentReference().Adjust(trace)
 			assert.Equal(t, testCase.expected, trace.Spans[0].References)
 		})
 	}

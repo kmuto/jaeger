@@ -5,14 +5,15 @@
 package app
 
 import (
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
 )
 
 // ProcessSpan processes a Domain Model Span
 type ProcessSpan func(span *model.Span, tenant string)
 
 // ProcessSpans processes a batch of Domain Model Spans
-type ProcessSpans func(spans []*model.Span, tenant string)
+type ProcessSpans func(spans processor.Batch)
 
 // FilterSpan decides whether to allow or disallow a span
 type FilterSpan func(span *model.Span) bool

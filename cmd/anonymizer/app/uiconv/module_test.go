@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 func TestModule_TraceSuccess(t *testing.T) {
@@ -30,7 +32,7 @@ func TestModule_TraceSuccess(t *testing.T) {
 
 	for i := range trace.Data {
 		for j := range trace.Data[i].Spans {
-			assert.Equal(t, "span.kind", trace.Data[i].Spans[j].Tags[0].Key)
+			assert.Equal(t, model.SpanKindKey, trace.Data[i].Spans[j].Tags[0].Key)
 		}
 	}
 }
@@ -46,7 +48,7 @@ func TestModule_TraceNonExistent(t *testing.T) {
 		TraceID:      "2be38093ead7a083",
 	}
 	err := Extract(config, zap.NewNop())
-	require.Contains(t, err.Error(), "cannot open captured file")
+	require.ErrorContains(t, err, "cannot open captured file")
 }
 
 func TestModule_TraceOutputFileError(t *testing.T) {
@@ -65,5 +67,5 @@ func TestModule_TraceOutputFileError(t *testing.T) {
 	defer os.Chmod("fixtures", 0o755)
 
 	err = Extract(config, zap.NewNop())
-	require.Contains(t, err.Error(), "cannot create output file")
+	require.ErrorContains(t, err, "cannot create output file")
 }

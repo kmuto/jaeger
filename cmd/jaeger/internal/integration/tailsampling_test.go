@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jaegertracing/jaeger/plugin/storage/integration"
+	"github.com/jaegertracing/jaeger/internal/storage/integration"
 )
 
 // TailSamplingIntegration contains the test components to perform an integration test
@@ -76,7 +76,7 @@ func (ts *TailSamplingIntegration) testTailSamplingProccessor(t *testing.T) {
 	var actual []string
 	assert.Eventually(t, func() bool {
 		var err error
-		actual, err = ts.SpanReader.GetServices(context.Background())
+		actual, err = ts.TraceReader.GetServices(context.Background())
 		require.NoError(t, err)
 		sort.Strings(actual)
 		return assert.ObjectsAreEqualValues(ts.expectedServices, actual)

@@ -7,7 +7,7 @@ package handler
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,10 +22,13 @@ import (
 	jaegerClient "github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/transport"
 
-	"github.com/jaegertracing/jaeger/thrift-gen/jaeger"
+	"github.com/jaegertracing/jaeger-idl/thrift-gen/jaeger"
 )
 
-var httpClient = &http.Client{Timeout: 2 * time.Second}
+var (
+	httpClient                      = &http.Client{Timeout: 2 * time.Second}
+	_          JaegerBatchesHandler = (*mockJaegerHandler)(nil)
+)
 
 type mockJaegerHandler struct {
 	err     error
@@ -33,7 +36,7 @@ type mockJaegerHandler struct {
 	batches []*jaeger.Batch
 }
 
-func (p *mockJaegerHandler) SubmitBatches(batches []*jaeger.Batch, _ SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error) {
+func (p *mockJaegerHandler) SubmitBatches(_ context.Context, batches []*jaeger.Batch, _ SubmitBatchOptions) ([]*jaeger.BatchSubmitResponse, error) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	p.batches = append(p.batches, batches...)
@@ -79,7 +82,7 @@ func TestThriftFormat(t *testing.T) {
 	assert.EqualValues(t, http.StatusAccepted, statusCode)
 	assert.EqualValues(t, "", resBodyStr)
 
-	handler.jaegerBatchesHandler.(*mockJaegerHandler).err = fmt.Errorf("Bad times ahead")
+	handler.jaegerBatchesHandler.(*mockJaegerHandler).err = errors.New("Bad times ahead")
 	statusCode, resBodyStr, err = postBytes("application/vnd.apache.thrift.binary", server.URL+`/api/traces`, someBytes)
 	require.NoError(t, err)
 	assert.EqualValues(t, http.StatusInternalServerError, statusCode)
@@ -161,7 +164,7 @@ func TestCannotReadBodyFromRequest(t *testing.T) {
 type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) {
-	return 0, fmt.Errorf("Simulated error reading body")
+	return 0, errors.New("Simulated error reading body")
 }
 
 type dummyResponseWriter struct {

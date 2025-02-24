@@ -13,7 +13,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/depstore"
 	ui "github.com/jaegertracing/jaeger/model/json"
 )
 
@@ -304,8 +305,10 @@ func TestGetDependenciesSuccess(t *testing.T) {
 	endTs := time.Unix(0, 1476374248550*millisToNanosMultiplier)
 	ts.dependencyReader.On("GetDependencies",
 		mock.Anything, // context
-		endTs,
-		defaultDependencyLookbackDuration,
+		depstore.QueryParameters{
+			StartTime: endTs.Add(-defaultDependencyLookbackDuration),
+			EndTime:   endTs,
+		},
 	).Return(expectedDependencies, nil).Times(1)
 
 	var response structuredResponse
@@ -315,7 +318,7 @@ func TestGetDependenciesSuccess(t *testing.T) {
 	actual := data.(map[string]any)
 	assert.Equal(t, "killer", actual["parent"])
 	assert.Equal(t, "queen", actual["child"])
-	assert.Equal(t, 12.00, actual["callCount"]) // recovered type is float
+	assert.InDelta(t, 12.00, actual["callCount"], 0.01) // recovered type is float
 	require.NoError(t, err)
 }
 
@@ -324,8 +327,11 @@ func TestGetDependenciesCassandraFailure(t *testing.T) {
 	endTs := time.Unix(0, 1476374248550*millisToNanosMultiplier)
 	ts.dependencyReader.On("GetDependencies",
 		mock.Anything, // context
-		endTs,
-		defaultDependencyLookbackDuration).Return(nil, errStorage).Times(1)
+		depstore.QueryParameters{
+			StartTime: endTs.Add(-defaultDependencyLookbackDuration),
+			EndTime:   endTs,
+		},
+	).Return(nil, errStorage).Times(1)
 
 	var response structuredResponse
 	err := getJSON(ts.server.URL+"/api/dependencies?endTs=1476374248550&service=testing", &response)

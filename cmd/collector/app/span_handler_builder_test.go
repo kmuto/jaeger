@@ -13,10 +13,11 @@ import (
 
 	"github.com/jaegertracing/jaeger/cmd/collector/app/flags"
 	cmdFlags "github.com/jaegertracing/jaeger/cmd/internal/flags"
+	"github.com/jaegertracing/jaeger/internal/storage/v1/memory"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/v1adapter"
 	"github.com/jaegertracing/jaeger/pkg/config"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
-	"github.com/jaegertracing/jaeger/plugin/storage/memory"
 )
 
 func TestNewSpanHandlerBuilder(t *testing.T) {
@@ -29,7 +30,7 @@ func TestNewSpanHandlerBuilder(t *testing.T) {
 	spanWriter := memory.NewStore()
 
 	builder := &SpanHandlerBuilder{
-		SpanWriter:    spanWriter,
+		TraceWriter:   v1adapter.NewTraceWriter(spanWriter),
 		CollectorOpts: cOpts,
 		TenancyMgr:    &tenancy.Manager{},
 	}
@@ -37,14 +38,15 @@ func TestNewSpanHandlerBuilder(t *testing.T) {
 	assert.NotNil(t, builder.metricsFactory())
 
 	builder = &SpanHandlerBuilder{
-		SpanWriter:     spanWriter,
+		TraceWriter:    v1adapter.NewTraceWriter(spanWriter),
 		CollectorOpts:  cOpts,
 		Logger:         zap.NewNop(),
 		MetricsFactory: metrics.NullFactory,
 		TenancyMgr:     &tenancy.Manager{},
 	}
 
-	spanProcessor := builder.BuildSpanProcessor()
+	spanProcessor, err := builder.BuildSpanProcessor()
+	require.NoError(t, err)
 	spanHandlers := builder.BuildHandlers(spanProcessor)
 	assert.NotNil(t, spanHandlers.ZipkinSpansHandler)
 	assert.NotNil(t, spanHandlers.JaegerBatchesHandler)

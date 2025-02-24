@@ -9,11 +9,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
+	"github.com/jaegertracing/jaeger-idl/proto-gen/api_v2"
 )
 
 // GrpcCollector is a mock collector for tests
@@ -33,7 +34,7 @@ func StartGRPCCollector(t *testing.T) *GrpcCollector {
 	handler := &mockSpanHandler{t: t}
 	api_v2.RegisterCollectorServiceServer(server, handler)
 	go func() {
-		require.NoError(t, server.Serve(lis))
+		assert.NoError(t, server.Serve(lis))
 	}()
 	return &GrpcCollector{
 		mockSpanHandler: handler,

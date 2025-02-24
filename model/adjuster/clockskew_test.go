@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 )
 
 func TestClockSkewAdjuster(t *testing.T) {
@@ -187,8 +187,8 @@ func TestClockSkewAdjuster(t *testing.T) {
 		testCase := tt // capture loop var
 		t.Run(testCase.description, func(t *testing.T) {
 			adjuster := ClockSkew(tt.maxAdjust)
-			trace, err := adjuster.Adjust(makeTrace(testCase.trace))
-			require.NoError(t, err)
+			trace := makeTrace(testCase.trace)
+			adjuster.Adjust(trace)
 			if testCase.err != "" {
 				var err string
 				for _, span := range trace.Spans {

@@ -5,34 +5,34 @@ package storageexporter
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/storagetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-	"go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/jaegertracing/jaeger/cmd/jaeger/internal/extension/jaegerstorage"
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/plugin/storage/memory"
-	"github.com/jaegertracing/jaeger/storage"
-	factoryMocks "github.com/jaegertracing/jaeger/storage/mocks"
+	"github.com/jaegertracing/jaeger/internal/jiter"
+	"github.com/jaegertracing/jaeger/internal/storage/v1"
+	"github.com/jaegertracing/jaeger/internal/storage/v1/memory"
+	factoryMocks "github.com/jaegertracing/jaeger/internal/storage/v1/mocks"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore"
+	tracestoreMocks "github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore/mocks"
+	"github.com/jaegertracing/jaeger/pkg/otelsemconv"
 )
 
 type mockStorageExt struct {
 	name           string
-	factory        *factoryMocks.Factory
-	metricsFactory *factoryMocks.MetricsFactory
+	factory        *tracestoreMocks.Factory
+	metricsFactory *factoryMocks.MetricStoreFactory
 }
 
 var _ jaegerstorage.Extension = (*mockStorageExt)(nil)
@@ -45,14 +45,14 @@ func (*mockStorageExt) Shutdown(context.Context) error {
 	panic("not implemented")
 }
 
-func (m *mockStorageExt) TraceStorageFactory(name string) (storage.Factory, bool) {
+func (m *mockStorageExt) TraceStorageFactory(name string) (tracestore.Factory, bool) {
 	if m.name == name {
 		return m.factory, true
 	}
 	return nil, false
 }
 
-func (m *mockStorageExt) MetricStorageFactory(name string) (storage.MetricsFactory, bool) {
+func (m *mockStorageExt) MetricStorageFactory(name string) (storage.MetricStoreFactory, bool) {
 	if m.name == name {
 		return m.metricsFactory, true
 	}
@@ -69,19 +69,18 @@ func TestExporterStartBadNameError(t *testing.T) {
 	host := storagetest.NewStorageHost()
 	host.WithExtension(jaegerstorage.ID, &mockStorageExt{name: "foo"})
 
-	exporter := &storageExporter{
+	exp := &storageExporter{
 		config: &Config{
 			TraceStorage: "bar",
 		},
 	}
-	err := exporter.start(context.Background(), host)
-	require.Error(t, err)
+	err := exp.start(context.Background(), host)
 	require.ErrorContains(t, err, "cannot find storage factory")
 }
 
 func TestExporterStartBadSpanstoreError(t *testing.T) {
-	factory := new(factoryMocks.Factory)
-	factory.On("CreateSpanWriter").Return(nil, errors.New("mocked error"))
+	factory := new(tracestoreMocks.Factory)
+	factory.On("CreateTraceWriter").Return(nil, assert.AnError)
 
 	host := storagetest.NewStorageHost()
 	host.WithExtension(jaegerstorage.ID, &mockStorageExt{
@@ -89,14 +88,13 @@ func TestExporterStartBadSpanstoreError(t *testing.T) {
 		factory: factory,
 	})
 
-	exporter := &storageExporter{
+	exp := &storageExporter{
 		config: &Config{
 			TraceStorage: "foo",
 		},
 	}
-	err := exporter.start(context.Background(), host)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "mocked error")
+	err := exp.start(context.Background(), host)
+	require.ErrorIs(t, err, assert.AnError)
 }
 
 func TestExporter(t *testing.T) {
@@ -106,10 +104,7 @@ func TestExporter(t *testing.T) {
 	telemetrySettings := component.TelemetrySettings{
 		Logger:         zaptest.NewLogger(t),
 		TracerProvider: nooptrace.NewTracerProvider(),
-		LeveledMeterProvider: func(_ configtelemetry.Level) metric.MeterProvider {
-			return noopmetric.NewMeterProvider()
-		},
-		MeterProvider: noopmetric.NewMeterProvider(),
+		MeterProvider:  noopmetric.NewMeterProvider(),
 	}
 
 	const memstoreName = "memstore"
@@ -119,7 +114,7 @@ func TestExporter(t *testing.T) {
 	err := config.Validate()
 	require.NoError(t, err)
 
-	tracesExporter, err := exporterFactory.CreateTracesExporter(ctx, exporter.Settings{
+	tracesExporter, err := exporterFactory.CreateTraces(ctx, exporter.Settings{
 		ID:                ID,
 		TelemetrySettings: telemetrySettings,
 		BuildInfo:         component.NewDefaultBuildInfo(),
@@ -149,34 +144,43 @@ func TestExporter(t *testing.T) {
 	err = tracesExporter.ConsumeTraces(ctx, traces)
 	require.NoError(t, err)
 
-	storageFactory, err := jaegerstorage.GetStorageFactory(memstoreName, host)
+	storageFactory, err := jaegerstorage.GetTraceStoreFactory(memstoreName, host)
 	require.NoError(t, err)
-	spanReader, err := storageFactory.CreateSpanReader()
+	traceReader, err := storageFactory.CreateTraceReader()
 	require.NoError(t, err)
-	requiredTraceID := model.NewTraceID(0, 1) // 00000000000000000000000000000001
-	requiredTrace, err := spanReader.GetTrace(ctx, requiredTraceID)
+	requiredTraceID := [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	getTracesIter := traceReader.GetTraces(ctx, tracestore.GetTraceParams{
+		TraceID: requiredTraceID,
+	})
+	requiredTrace, err := jiter.FlattenWithErrors(getTracesIter)
 	require.NoError(t, err)
-	assert.Equal(t, spanID.String(), requiredTrace.Spans[0].SpanID.String())
+	resource := requiredTrace[0].ResourceSpans().At(0)
+	assert.Equal(t, spanID, resource.ScopeSpans().At(0).Spans().At(0).SpanID())
+
+	// check that the service name attribute was added by the sanitizer
+	serviceName, ok := resource.Resource().Attributes().Get(string(otelsemconv.ServiceNameKey))
+	require.True(t, ok)
+	require.Equal(t, "missing-service-name", serviceName.Str())
 }
 
 func makeStorageExtension(t *testing.T, memstoreName string) component.Host {
 	telemetrySettings := component.TelemetrySettings{
 		Logger:         zaptest.NewLogger(t),
 		TracerProvider: nooptrace.NewTracerProvider(),
-		LeveledMeterProvider: func(_ configtelemetry.Level) metric.MeterProvider {
-			return noopmetric.NewMeterProvider()
-		},
-		MeterProvider: noopmetric.NewMeterProvider(),
+		MeterProvider:  noopmetric.NewMeterProvider(),
 	}
 	extensionFactory := jaegerstorage.NewFactory()
-	storageExtension, err := extensionFactory.CreateExtension(
+	storageExtension, err := extensionFactory.Create(
 		context.Background(),
 		extension.Settings{
+			ID:                jaegerstorage.ID,
 			TelemetrySettings: telemetrySettings,
 		},
-		&jaegerstorage.Config{Backends: map[string]jaegerstorage.Backend{
-			memstoreName: {Memory: &memory.Configuration{MaxTraces: 10000}},
-		}},
+		&jaegerstorage.Config{
+			TraceBackends: map[string]jaegerstorage.TraceBackend{
+				memstoreName: {Memory: &memory.Configuration{MaxTraces: 10000}},
+			},
+		},
 	)
 	require.NoError(t, err)
 

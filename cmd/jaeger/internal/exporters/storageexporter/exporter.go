@@ -12,24 +12,29 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jaegertracing/jaeger/cmd/jaeger/internal/extension/jaegerstorage"
-	"github.com/jaegertracing/jaeger/storage_v2/spanstore"
+	"github.com/jaegertracing/jaeger/cmd/jaeger/internal/sanitizer"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore"
 )
 
 type storageExporter struct {
 	config      *Config
 	logger      *zap.Logger
-	traceWriter spanstore.Writer
+	traceWriter tracestore.Writer
+	sanitizer   sanitizer.Func
 }
 
 func newExporter(config *Config, otel component.TelemetrySettings) *storageExporter {
 	return &storageExporter{
 		config: config,
 		logger: otel.Logger,
+		sanitizer: sanitizer.NewChainedSanitizer(
+			sanitizer.NewStandardSanitizers()...,
+		),
 	}
 }
 
 func (exp *storageExporter) start(_ context.Context, host component.Host) error {
-	f, err := jaegerstorage.GetStorageFactoryV2(exp.config.TraceStorage, host)
+	f, err := jaegerstorage.GetTraceStoreFactory(exp.config.TraceStorage, host)
 	if err != nil {
 		return fmt.Errorf("cannot find storage factory: %w", err)
 	}
@@ -47,5 +52,5 @@ func (*storageExporter) close(_ context.Context) error {
 }
 
 func (exp *storageExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
-	return exp.traceWriter.WriteTraces(ctx, td)
+	return exp.traceWriter.WriteTraces(ctx, exp.sanitizer(td))
 }

@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -14,17 +13,17 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/flags"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/handler"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/processor"
-	"github.com/jaegertracing/jaeger/cmd/collector/app/sampling/samplingstrategy"
 	"github.com/jaegertracing/jaeger/cmd/collector/app/server"
 	"github.com/jaegertracing/jaeger/internal/safeexpvar"
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger/internal/sampling/samplingstrategy"
+	"github.com/jaegertracing/jaeger/internal/storage/v2/api/tracestore"
 	"github.com/jaegertracing/jaeger/pkg/healthcheck"
 	"github.com/jaegertracing/jaeger/pkg/metrics"
 	"github.com/jaegertracing/jaeger/pkg/tenancy"
-	"github.com/jaegertracing/jaeger/storage/spanstore"
 )
 
 const (
@@ -38,7 +37,7 @@ type Collector struct {
 	serviceName        string
 	logger             *zap.Logger
 	metricsFactory     metrics.Factory
-	spanWriter         spanstore.Writer
+	traceWriter        tracestore.Writer
 	samplingProvider   samplingstrategy.Provider
 	samplingAggregator samplingstrategy.Aggregator
 	hCheck             *healthcheck.HealthCheck
@@ -47,13 +46,10 @@ type Collector struct {
 	tenancyMgr         *tenancy.Manager
 
 	// state, read only
-	hServer                    *http.Server
-	grpcServer                 *grpc.Server
-	otlpReceiver               receiver.Traces
-	zipkinReceiver             receiver.Traces
-	tlsGRPCCertWatcherCloser   io.Closer
-	tlsHTTPCertWatcherCloser   io.Closer
-	tlsZipkinCertWatcherCloser io.Closer
+	hServer        *http.Server
+	grpcServer     *grpc.Server
+	otlpReceiver   receiver.Traces
+	zipkinReceiver receiver.Traces
 }
 
 // CollectorParams to construct a new Jaeger Collector.
@@ -61,7 +57,7 @@ type CollectorParams struct {
 	ServiceName        string
 	Logger             *zap.Logger
 	MetricsFactory     metrics.Factory
-	SpanWriter         spanstore.Writer
+	TraceWriter        tracestore.Writer
 	SamplingProvider   samplingstrategy.Provider
 	SamplingAggregator samplingstrategy.Aggregator
 	HealthCheck        *healthcheck.HealthCheck
@@ -74,7 +70,7 @@ func New(params *CollectorParams) *Collector {
 		serviceName:        params.ServiceName,
 		logger:             params.Logger,
 		metricsFactory:     params.MetricsFactory,
-		spanWriter:         params.SpanWriter,
+		traceWriter:        params.TraceWriter,
 		samplingProvider:   params.SamplingProvider,
 		samplingAggregator: params.SamplingAggregator,
 		hCheck:             params.HealthCheck,
@@ -85,7 +81,7 @@ func New(params *CollectorParams) *Collector {
 // Start the component and underlying dependencies
 func (c *Collector) Start(options *flags.CollectorOptions) error {
 	handlerBuilder := &SpanHandlerBuilder{
-		SpanWriter:     c.spanWriter,
+		TraceWriter:    c.traceWriter,
 		CollectorOpts:  options,
 		Logger:         c.logger,
 		MetricsFactory: c.metricsFactory,
@@ -95,32 +91,29 @@ func (c *Collector) Start(options *flags.CollectorOptions) error {
 	var additionalProcessors []ProcessSpan
 	if c.samplingAggregator != nil {
 		additionalProcessors = append(additionalProcessors, func(span *model.Span, _ /* tenant */ string) {
-			c.samplingAggregator.HandleRootSpan(span, c.logger)
+			c.samplingAggregator.HandleRootSpan(span)
 		})
 	}
 
-	c.spanProcessor = handlerBuilder.BuildSpanProcessor(additionalProcessors...)
+	spanProcessor, err := handlerBuilder.BuildSpanProcessor(additionalProcessors...)
+	if err != nil {
+		return fmt.Errorf("could not create span processor: %w", err)
+	}
+	c.spanProcessor = spanProcessor
 	c.spanHandlers = handlerBuilder.BuildHandlers(c.spanProcessor)
-
 	grpcServer, err := server.StartGRPCServer(&server.GRPCServerParams{
-		HostPort:                options.GRPC.HostPort,
-		Handler:                 c.spanHandlers.GRPCHandler,
-		TLSConfig:               options.GRPC.TLS,
-		SamplingProvider:        c.samplingProvider,
-		Logger:                  c.logger,
-		MaxReceiveMessageLength: options.GRPC.MaxReceiveMessageLength,
-		MaxConnectionAge:        options.GRPC.MaxConnectionAge,
-		MaxConnectionAgeGrace:   options.GRPC.MaxConnectionAgeGrace,
+		Handler:          c.spanHandlers.GRPCHandler,
+		SamplingProvider: c.samplingProvider,
+		Logger:           c.logger,
+		ServerConfig:     options.GRPC,
 	})
 	if err != nil {
 		return fmt.Errorf("could not start gRPC server: %w", err)
 	}
 	c.grpcServer = grpcServer
-
 	httpServer, err := server.StartHTTPServer(&server.HTTPServerParams{
-		HostPort:         options.HTTP.HostPort,
+		ServerConfig:     options.HTTP,
 		Handler:          c.spanHandlers.JaegerBatchesHandler,
-		TLSConfig:        options.HTTP.TLS,
 		HealthCheck:      c.hCheck,
 		MetricsFactory:   c.metricsFactory,
 		SamplingProvider: c.samplingProvider,
@@ -131,11 +124,7 @@ func (c *Collector) Start(options *flags.CollectorOptions) error {
 	}
 	c.hServer = httpServer
 
-	c.tlsGRPCCertWatcherCloser = &options.GRPC.TLS
-	c.tlsHTTPCertWatcherCloser = &options.HTTP.TLS
-	c.tlsZipkinCertWatcherCloser = &options.Zipkin.TLS
-
-	if options.Zipkin.HTTPHostPort == "" {
+	if options.Zipkin.Endpoint == "" {
 		c.logger.Info("Not listening for Zipkin HTTP traffic, port not configured")
 	} else {
 		zipkinReceiver, err := handler.StartZipkinReceiver(options, c.logger, c.spanProcessor, c.tenancyMgr)
@@ -207,17 +196,6 @@ func (c *Collector) Close() error {
 		if err := c.samplingAggregator.Close(); err != nil {
 			c.logger.Error("failed to close aggregator.", zap.Error(err))
 		}
-	}
-
-	// watchers actually never return errors from Close
-	if c.tlsGRPCCertWatcherCloser != nil {
-		_ = c.tlsGRPCCertWatcherCloser.Close()
-	}
-	if c.tlsHTTPCertWatcherCloser != nil {
-		_ = c.tlsHTTPCertWatcherCloser.Close()
-	}
-	if c.tlsZipkinCertWatcherCloser != nil {
-		_ = c.tlsZipkinCertWatcherCloser.Close()
 	}
 
 	return nil
