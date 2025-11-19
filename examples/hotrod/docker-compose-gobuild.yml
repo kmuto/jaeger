@@ -1,10 +1,11 @@
 services:
   gobuild:
-    image: golang:bookworm
+    image: golang:trixie
     environment:
       - CGO_ENABLED=0
       - GOOS=linux
+      - GOARCH
     volumes:
       - ../..:/work
     working_dir: /work/examples/hotrod
-    command: ["go", "build", "-buildvcs=false", "-o", "hotrod-linux"]
+    command: go build -buildvcs=false -o hotrod-linux-$GOARCH

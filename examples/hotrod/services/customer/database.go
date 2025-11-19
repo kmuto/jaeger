@@ -70,6 +70,9 @@ func (d *database) Get(ctx context.Context, customerID int) (*Customer, error) {
 		attribute.
 			Key("sql.query").
 			String(fmt.Sprintf("SELECT * FROM customer WHERE customer_id=%d", customerID)),
+		attribute.
+			Key("db.query.text").
+			String("SELECT * FROM customer WHERE customer_id=?"),
 	)
 	defer span.End()
 
